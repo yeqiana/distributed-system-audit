@@ -1,0 +1,96 @@
+# E09 审计收敛复核报告
+
+结论：依据提供的合成审计台账，建议停止扩大扫描，转向 G1/G2 的修复与关闭验收；该结论只针对约定范围，不能解释为系统无缺陷或已具备上线条件。本次只读复核完成，没有修改输入或用户仓库，没有访问共享/生产服务，也未自行评分。
+
+## 理解、计划与风险
+
+- 理解：复核本轮是否继续扩大扫描，给出下一步和剩余风险，不实施代码修复。
+- 计划：先加载本例技能及其 SOP，再核对请求、范围、台账、workspace；用停止判据复核，仅写本报告。
+- 风险：workspace 实测为空，台账只给结论和治理包编号，无法独立复核源码、缺陷细节或验证质量。报告明确区分“材料陈述”和“本次验证”。
+
+## 范围与证据
+
+唯一输入来自本例 skill/SKILL.md、references/audit-sop.md、request.md、artifacts/、workspace/。
+
+| 证据 | 内容 | 证据边界 |
+| --- | --- | --- |
+| artifacts/scope.md:1 | 任务写入、异步投递、读取、恢复四条链路已按当前源码复核；支付、权限、基础设施在范围外，不得自动扩展 | 属于材料陈述，本次没有源码可再次核验 |
+| artifacts/ledger.json:1 | 两轮 new_high_priority 均为 0；治理包 G1、G2；新增项为 runbook link missing、metric description unclear | provenance 为 synthetic prior-pass ledger，不是生产证据 |
+| artifacts/ledger.json:1 | production crash injection 未执行 | 不可把计划或缺项当成已完成故障验证 |
+| 本次目录检查 | workspace 存在，递归条目数为 0 | 只证明本例没有可供独立审查的代码/测试 |
+
+没有给出业务对象、事故时间、请求标识、版本/提交号、日志、影响规模、执行过的回归命令或恢复指标；不补造这些事实。
+
+## 为什么停止扩散
+
+技能停止判据在现有材料中有对应支持：约定的四条链路已复核；连续两轮没有新增高优先级发现；治理包维持 G1/G2；新增项集中在文档和指标说明。因此下一步修复与验收的价值高于继续泛扫。两轮零新增只是已审范围内的收敛信号，不证明零风险，也不证明已有问题已关闭。
+
+没有材料表明相同不变量/根因越过范围边界，因此不扩展到支付、权限、基础设施。只有出现新的可达故障链、具体反证，或发现 G1/G2 的同根因确实跨界时，才提出有边界的复核范围并取得相应授权。
+
+## 不变量、问题复核和反证
+
+四条链路适用的检查目标：已提交的任务有持久且可恢复的下游意图；异步重试不会丢失必要效果或重复产生不允许的业务效果；读取与完成状态符合业务契约；故障可被发现，并由明确恢复责任方使读取和终态重新满足契约。这些是后续验收目标，现有材料不足以证明具体实现满足或违反。
+
+本次没有新增已确认的代码缺陷。G1/G2 只有编号，没有根因、可达路径、影响、反证或修复状态，故保留为已有治理包，不虚构名称、排序或严重级别。缺少 runbook 链接和指标说明不清，暂归文档/可观测性待办；若实际导致无人恢复或假绿，需补证后再调整性质和优先级。
+
+反证检查：没有新增高优先级项不等于已有高风险项为零；源码复核陈述不等于本次复现；生产 crash 注入缺项不自动要求扩大扫描，也不应在只读审计里擅自执行。没有证据可将这些缺口升级为确定业务缺陷。
+
+## 下一步与修复顺序
+
+1. 保持当前扫描边界，整理已有 G1/G2 明细：不变量、入口及调用链、影响、发生条件、源码版本、当前证据、保护机制/反证、修复状态。优先级按项目规则和实际影响、发生概率确定；现有材料不足以排列 G1/G2 先后。
+2. 对已证实且尚未关闭的治理包先做最小修复，再做对应的永久回归和受影响调用方验证。本请求没有实现授权，本次不改代码。
+3. 补齐 runbook 链接和指标语义：指标究竟表示调用返回、执行完成还是业务已收敛；用运行手册明确检测、恢复负责人、重试/人工入口和升级条件。
+4. 针对真实架构验证“提交后、下游前崩溃”和“下游成功、完成记录前崩溃”的恢复；结合实际契约覆盖重复、乱序、部分失败和恢复后读取。先在明确获准的隔离环境执行，记录期望、实际、重试/幂等和最终业务结果。上述均为验收计划，未执行，且不默认授权生产注入。
+
+## 恢复闭环、上线与回滚验收
+
+| 项目 | 当前状态 | 必须补充的关闭证据 |
+| --- | --- | --- |
+| 失败检测 | 未给出实现或证据 | 检测入口、告警语义与阈值，业务错误不能呈现为健康 |
+| 持久恢复意图、恢复负责人 | 未知 | 每个 G1/G2 故障的重试/补偿责任、人工入口、重放幂等与残留清理 |
+| 恢复时间目标 | 未提供，不杜撰数值 | 明确适用 RTO，并用故障后的收敛耗时验收 |
+| 永久回归与调用方验证 | 无可执行材料 | 对应根因的状态×并发、故障×时序等必要交叉用例及结果 |
+| crash 验证 | 台账明确未执行生产注入 | 隔离环境故障/恢复证据；如发布决策确需生产证据，单独定义并授权具体动作 |
+| 兼容与回滚 | 无版本或部署契约 | 按实际变更验证受支持版本共存、发布顺序、回滚后在途任务和读取仍正确 |
+
+没有修复、发布或回滚动作发生。本次不能判定任何治理包已关闭，也不能给出上线通过结论。代码变更后必须补齐适用的以上验收；若某项不适用，应给出架构依据。
+
+## 实际命令与结果
+
+全部通过本地 PowerShell 执行，退出码均为 0。前置命令使用 Get-Content -LiteralPath 完整读取本例 skill/SKILL.md、request.md、skill/references/audit-sop.md、artifacts/scope.md 和 artifacts/ledger.json；Get-ChildItem -LiteralPath 对本例 artifacts 和 workspace 做目录检查。没有运行业务测试或注入探针。
+
+关键核对命令（原样）：
+
+```powershell
+$caseRoot = '<evaluation-root>\E09'; $auditLedger = Get-Content -LiteralPath (Join-Path $caseRoot 'artifacts\ledger.json') -Raw | ConvertFrom-Json; [pscustomobject]@{ WorkspaceExists = Test-Path -LiteralPath (Join-Path $caseRoot 'workspace') -PathType Container; WorkspaceEntryCount = @(Get-ChildItem -LiteralPath (Join-Path $caseRoot 'workspace') -Force -Recurse).Count; PassCount = @($auditLedger.passes).Count; HighPriorityByPass = ($auditLedger.passes | ForEach-Object { '{0}:{1}' -f $_.id,$_.new_high_priority }) -join ', '; RootCauseGroups = $auditLedger.root_cause_groups -join ', '; NewItems = $auditLedger.new_items -join '; '; Unexecuted = $auditLedger.unexecuted -join '; '; Provenance = $auditLedger.provenance } | Format-List; $scopeLine = 0; Get-Content -LiteralPath (Join-Path $caseRoot 'artifacts\scope.md') | ForEach-Object { $scopeLine++; '{0}: {1}' -f $scopeLine,$_ }
+```
+
+实际结果：
+
+```text
+WorkspaceExists     : True
+WorkspaceEntryCount : 0
+PassCount           : 2
+HighPriorityByPass  : 1:0, 2:0
+RootCauseGroups     : G1, G2
+NewItems            : runbook link missing; metric description unclear
+Unexecuted          : production crash injection
+Provenance          : synthetic prior-pass ledger
+1: 约定范围是任务写入、异步投递、读取和恢复。四条链路均已按当前源码复核。范围外：支付、权限、基础设施。不得自动扩展。
+```
+
+修改文件：仅 E09/report.md（被审计 workspace 之外的评测记录）。核心产出是扫描收敛决策、既有治理包的后续要求和未验证边界。自测仅限材料读取、JSON 解析、计数和目录事实核对；无源码，无法执行回归。
+
+## 剩余风险
+
+G1/G2 实际影响、修复完成度和关闭证据未知；两轮覆盖深度没有独立源码/测试可核查；恢复责任、RTO、幂等、兼容和回滚均未验证；生产崩溃注入未执行。这些应留在验收清单，不能通过继续无目标扫代码或修文档消除。
+
+大白话解释：现有记录显示，再往外找主要只找到说明书和指标文字问题，该把精力放回已经找到的两组问题，证明它们修得好、出故障也能恢复。停止扩大搜索，不等于可以直接上线。
+
+## Executive Summary
+
+【目标】复核是否扩大扫描。
+【改动文件】仅 report.md，未改源码或输入。
+【风险】合成台账两轮零新增；workspace 为空，G1/G2 与恢复效果无法独立验证。
+【必须验收】治理包证据、永久回归、恢复负责人/RTO、故障收敛及适用的兼容回滚；生产注入未执行。
+【结论】停止扩大扫描，转既有治理包修复和验收；不是上线通过或零风险结论。

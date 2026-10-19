@@ -1,0 +1,107 @@
+{
+  "delivery": {
+    "parent_status": "DONE",
+    "receipt_counts": {
+      "PENDING": 1,
+      "SENT": 99
+    },
+    "retry_tasks": []
+  },
+  "lease_free": {
+    "completion_updates": [
+      1,
+      0
+    ],
+    "effect_count": 1,
+    "lease": null
+  },
+  "lease_guarded": {
+    "guarded": true,
+    "steps": [
+      {
+        "action": "A_claim",
+        "row": {
+          "generation": 1,
+          "id": 1,
+          "owner": "A",
+          "result": null,
+          "status": "PROCESSING"
+        }
+      },
+      {
+        "action": "B_takeover_and_complete",
+        "row": {
+          "generation": 2,
+          "id": 1,
+          "owner": "B",
+          "result": "B-result",
+          "status": "COMPLETED"
+        }
+      },
+      {
+        "action": "A_resume_complete",
+        "affected": 0,
+        "row": {
+          "generation": 2,
+          "id": 1,
+          "owner": "B",
+          "result": "B-result",
+          "status": "COMPLETED"
+        }
+      }
+    ]
+  },
+  "lease_plain": {
+    "guarded": false,
+    "steps": [
+      {
+        "action": "A_claim",
+        "row": {
+          "generation": 1,
+          "id": 1,
+          "owner": "A",
+          "result": null,
+          "status": "PROCESSING"
+        }
+      },
+      {
+        "action": "B_takeover_and_complete",
+        "row": {
+          "generation": 2,
+          "id": 1,
+          "owner": "B",
+          "result": "B-result",
+          "status": "COMPLETED"
+        }
+      },
+      {
+        "action": "A_resume_complete",
+        "affected": 1,
+        "row": {
+          "generation": 2,
+          "id": 1,
+          "owner": "B",
+          "result": "A-result",
+          "status": "COMPLETED"
+        }
+      }
+    ]
+  },
+  "outbox": {
+    "errors": [
+      "synthetic failure before event insert for 1",
+      "synthetic failure before event insert for 2",
+      "synthetic failure before event insert for 3"
+    ],
+    "event_count": 0,
+    "fact_count": 3
+  },
+  "read_health": {
+    "reader_valid": false,
+    "reconcile_healthy": true,
+    "stored": {
+      "checksum": "a5496b389714c67cba567ed56586cd63ff957b1090d46a4119dc0206d49fdd37",
+      "payload": "{\"id\":\"obj-1\",\"value\":\"changed\"}"
+    }
+  }
+}

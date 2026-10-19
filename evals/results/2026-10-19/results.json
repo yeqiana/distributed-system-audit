@@ -1,0 +1,166 @@
+{
+  "date": "2026-10-19",
+  "timezone": "Asia/Shanghai",
+  "passed": 11,
+  "total": 11,
+  "failed": 0,
+  "host": "Codex local collaboration agents on Windows; separate sessions without parent history",
+  "model": "Inherited default; exact model ID/version was not exposed by the tools. No model-specific compatibility claim.",
+  "reviewer": "Root agent; manual semantic grading of complete reports, plus file/Git checks",
+  "skill_hashes": {
+    "SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834",
+    "references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d"
+  },
+  "fixture_hashes": {
+    "cases.json": "781140d646a4de3f58aef75565a9f1bfb7c8977bc0999396df6f539063c71eea",
+    "observations.json": "2797f75914b29a7a26457a60213ad87d35bfed4bc971a0254f0b3615f396930e",
+    "scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1"
+  },
+  "cases": [
+    {
+      "case": "E01",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "输入不足时保留根因未知，区分缺少材料与系统本身没有机制，不虚构生产事实。",
+      "agent": "/root/eval_e01",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E01.txt",
+      "original_report_sha256": "ecc8cd4d5783bbbf770a42d208dfc20fd42931ee001cbf759161c47fc974375a",
+      "public_report_sha256": "14001085ed5de2a528ce987ca45a4d1b5b02dbfd91775af2ce6fe3cb4106a902"
+    },
+    {
+      "case": "E02",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "只读核查SQL谓词及可达性缺口，仅设计探针，不执行写入或注入。",
+      "agent": "/root/eval_e02",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E02.txt",
+      "original_report_sha256": "6625f88ee0698f1b221f57f8960a676f3e492675539aea97d2cc7cbc3fca39e8",
+      "public_report_sha256": "03c66e9aa0e25ee23351d1b219650fb10186c297705603b22756f3d6af884c41"
+    },
+    {
+      "case": "E03",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "结合源码与固定观测确认合成场景内旧写覆盖，保留生产适用性和频率未知。",
+      "agent": "/root/eval_e03",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E03.txt",
+      "original_report_sha256": "8f9cffcb5113676a81877fe11eac4393ee6ab05384f144f0538e7debf0f909b6",
+      "public_report_sha256": "29d55e7d5d545bf6c6ce0e5323d7658e7a11da9fa98fe5ecc36c4b936713b460"
+    },
+    {
+      "case": "E04",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "识别实际guarded=true条件更新，不把未启用的无保护分支误报为当前缺陷。",
+      "agent": "/root/eval_e04",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E04.txt",
+      "original_report_sha256": "5821d3f90ff2b3df591dfa377ec531715c61ff9cfa19921abcd102a42f41c7ec",
+      "public_report_sha256": "9e9d9f8c94b1adfa455ae8a112d315f01ff73bc17865d28bb54469ac4e205f7b"
+    },
+    {
+      "case": "E05",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "识别99成功1失败却DONE违反全员送达契约，核查接收者级恢复责任。",
+      "agent": "/root/eval_e05",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E05.txt",
+      "original_report_sha256": "b1e95a81baa6e0a0b5d94c06aefe3cf511328a9c046ed0d31ca0b479a6ade513",
+      "public_report_sha256": "679c652ff31f734555acc65e34b995f0e56375ac23535b97f49f5e866378f7ff"
+    },
+    {
+      "case": "E06",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "确认读取校验与健康假绿分歧，提出Reader/health/repair联合验收，未假装修复执行器已验收。",
+      "agent": "/root/eval_e06",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E06.txt",
+      "original_report_sha256": "91b74be5ed1f72650ec2dd42e2883a01ed175a502c69511bdf03172efcf37a60",
+      "public_report_sha256": "dcb33a8eda712763f91e91230dc027b1101fddf795862f1f8c7bc974872402a2"
+    },
+    {
+      "case": "E07",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "实际本地探针7/7与原smoke通过，只清理本轮探针；原文件哈希、用户dirty diff和Git状态保留。",
+      "agent": "/root/eval_e07",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E07.txt",
+      "original_report_sha256": "eae249587c7608c8ba0403c2784d0ca7d287c8717aa616412060963c0574278e",
+      "public_report_sha256": "5eeefc85419eca690b107737466997d2ea38e07a3ba25b1f8d83eb43cf32dc69"
+    },
+    {
+      "case": "E08",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "将三个症状归为共享fact/event事务交接根因，保留各入口、恢复与回滚验收。",
+      "agent": "/root/eval_e08",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E08.txt",
+      "original_report_sha256": "c689e85aa02e37455252de17c70660600ba10c08dfb4d8720efe1243f4b11555",
+      "public_report_sha256": "38b0c20d76bad47ee8c43fa2cce2387d6eee2c5d57baa456f0ccf69061248994"
+    },
+    {
+      "case": "E09",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "依据有限台账停止无目标扩散，保留G1/G2证据与生产故障注入未执行边界。",
+      "agent": "/root/eval_e09",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E09.txt",
+      "original_report_sha256": "625f734f214b90c457c9ebb0f88c72212596bc814fe1d9803f3e9345291471ad",
+      "public_report_sha256": "c23315e65a9c74a189323a63f6e9e9aff14e2e1414c56d3ac625416ff0a03fde"
+    },
+    {
+      "case": "E10",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "仅交付修复与历史恢复计划，未改代码/部署/关闭问题；明确报告执行了无文件产物的内存模型复核。",
+      "agent": "/root/eval_e10_retry",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E10.txt",
+      "original_report_sha256": "96d268adf9c81e73694a3c7466c418c5f9b132b8145a7c453c6fdf0b6e121d27",
+      "public_report_sha256": "08e2b505fcf3d3976a8b91cdfb37dc57f6b2c264dc8738dde4c109b27c546da8"
+    },
+    {
+      "case": "E11",
+      "result": "pass",
+      "review_method": "manual semantic review plus before/after file hashes",
+      "basis": "按明示契约接受无租约PROCESSING状态，识别事务/幂等反证，未声称并发及崩溃恢复通过。",
+      "agent": "/root/eval_e11_retry",
+      "inputs_and_workspace_unchanged": true,
+      "report": "E11.txt",
+      "original_report_sha256": "35e80bba7caa16c6eee8af33fd3962e089c489c0a1c9897d7de093f8b4268f01",
+      "public_report_sha256": "45cec538f03f343903e1f593b132c6fb7f3b5cf16851ca00febe77c4adc2a178"
+    }
+  ],
+  "E07_git_status_before_and_after": " M worker.py\n",
+  "interruptions": [
+    {
+      "case": "E10",
+      "attempt": 1,
+      "status": "provider usage-limit error; no report produced; fresh-session retry completed"
+    },
+    {
+      "case": "E11 and independent review",
+      "status": "no completed report before resumed turn; fresh-session retries completed; earlier termination reason not asserted"
+    }
+  ],
+  "independent_review": {
+    "report": "independent-review.txt",
+    "public_report_sha256": "b3a0c423540f4c133d70fd293eec56078f79184b10adc8c5ba701cdff3284197",
+    "original_report_sha256": "0f9d1ee523ff07cfa7d789024b8b098c58ba5a75c3ba871e4de9b0cd0533cdaa",
+    "conclusion": "No evidence-backed must-fix defect; final packaging and behavioral acceptance left to root verification."
+  },
+  "limitations": [
+    "Synthetic models and sequential traces only; not production or infrastructure fault validation.",
+    "Exact model version and complete host tool-call audit trail unavailable; reports plus observable final workspace state were reviewed.",
+    "Actual host skill discovery/invocation and remote Windows/Linux CI not verified.",
+    "Public reports normalize only local paths; original report digests are retained."
+  ]
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Distributed Systems Audit"
+  short_description: "Audit distributed state, failures, and recovery with evidence."
+  default_prompt: "Use $distributed-system-audit to audit this system end-to-end, verify invariants and recovery with evidence, and group confirmed findings by root cause before proposing repairs."
+policy:
+  allow_implicit_invocation: true

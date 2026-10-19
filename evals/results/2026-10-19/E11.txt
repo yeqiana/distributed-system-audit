@@ -1,0 +1,106 @@
+# E11 状态与完成处理只读审计
+
+结论：在给定契约和 `lease_free()` 合成实现范围内，没有证据支持“PROCESSING + lease=null 是非法状态”，也未发现可达的重复副作用或提前完成缺陷。已有材料支持顺序重复完成的幂等性；不能据此宣称并发、崩溃或生产恢复已通过。
+
+## 范围与证据
+
+仅使用本例 `skill/SKILL.md`、`skill/references/audit-sop.md`、`request.md`、`artifacts/`、`workspace/`。workspace 递归含隐藏项枚举为空，没有用户仓库源码、提交号、调度器或部署配置。所有业务材料均为合成材料，无生产证据。报告为本次唯一写入，位于 workspace 外；未修改输入、数据库、配置或服务，未执行脚本和故障探针。
+
+- `artifacts/contract.md:1`：PROCESSING 是待完成业务阶段，不代表已领取租约；执行器刻意无 lease。副作用仅为同一数据库事务中的 effect 插入，和条件终态更新原子提交；effect.job_id 唯一。明确指出进程崩溃、并发压测、生产恢复时间未测试。
+- `artifacts/observed.json:2-7`：completion_updates=[1,0]、effect_count=1、lease=null。这是随材料提供的结果，本次没有重跑或验证其生成时间；且输出未直接包含最终 status。
+- `artifacts/scenarios.py:77-93`：目标模型 lease_free。:79-82 建表及初始化；:84-89 两次顺序尝试，同一 `with db` 中条件更新，仅 affected 非零时插入 effect；:90-91 查询计数和 lease。
+- 同文件的 lease、delivery、read_health、outbox 是其他独立合成函数；目标 lease_free 不调用它们，不能将其中缺陷归到本任务。
+
+本次输入 SHA256：
+
+| 文件 | SHA256 |
+| --- | --- |
+| contract.md | C9E56DF5C4D3E56DD6316E94FE609E5AA660F5FA3322DD8F7AA23722575F5088 |
+| observed.json | 0AFBCBCF1298772AAD459220AB61E6025D47363A29203B9121F246C11CF95FDC |
+| scenarios.py | 9DD089F8B3954CAAA361FF9C468763E97EAC16CCF26CF9EC17444E2E55206EF1 |
+
+## 理解、计划与风险
+
+理解：判断现场状态是否违反本例契约，以及完成处理能否重复、能否发生半提交。计划：核对状态契约，跟踪目标函数，检查重复与事务边界，复核反证和恢复缺口。风险：只有最小合成模型，缺少实际调用方、持久化生产库和执行调度；源代码推断与给定记录不能替代真实运行验收。
+
+## 实际链路与不变量
+
+链路：初始化 job(id=1, PROCESSING, lease=NULL) 并提交 → 执行一次事务 → UPDATE job WHERE id=1 AND status=PROCESSING → 更新命中才 INSERT effect(job_id=1) → 提交 → 再次调用时 UPDATE 命中 0 行、不插入 effect。
+
+job.id 是状态对象标识，effect.job_id 主键是副作用唯一标识。完成资格由数据库条件更新决定，不存在 lease 领取、续租、抢占或 generation 协议。此模型没有外部 HTTP/MQ/cache/outbox 或独立读服务。完成判据为业务 effect 与 COMPLETED 一起持久化，而非仅函数返回。
+
+必须保持：
+
+1. 允许 PROCESSING 且 lease=NULL；不能凭空添加租约状态限制。
+2. 同一 job 最多一个 effect；重复完成不能新增 effect。
+3. 正常提交路径中 COMPLETED 与 effect 一起出现；effect 插入失败不得保留提前写入的 COMPLETED。
+4. COMPLETED 后重复调用不再次处理、不逆转终态。
+
+## 已确认行为、反证与可达路径
+
+| 场景 | 材料支持的行为 | 证据性质及结论 |
+| --- | --- | --- |
+| 初始 PROCESSING、无 lease | 初始化合法，执行器无需领取租约 | 契约明示 + 源码；排除“无租约必然失控”误报 |
+| 第一次完成 | 条件更新 1 行，插入 1 个 effect | 给定 observed 与源码相符；本次未运行复现 |
+| 同一 job 顺序重复完成 | 更新 0 行，不再插入；effect 总数 1 | 给定 observed；排除本模型顺序重复副作用 |
+| UPDATE 后 INSERT 报错 | with db 事务应回滚 UPDATE，不能单独提交 COMPLETED | 契约保证、源码推断；故障未注入，仍需验证 |
+| 两执行者并发完成 | 条件 UPDATE 与主键提供防重基础；SQLite 写竞争可能有等待或锁错误 | 未做多连接并发；不能将顺序两次调用当作并发证据，锁错误恢复策略未知 |
+| 提交前后进程退出 | 原子事务提供恢复基础；提交前回滚、提交后重试应命中 0 行 | 未实际 crash；当前 :memory: 库无法验证持久化重启恢复 |
+
+已确认缺陷：无。无目标项目严重性标尺，不赋予通用 P0/P1，也不为排除项制造修复级别。当前应优先补证据，而非引入租约或改公共状态机。
+
+现有反证足以排除“必须使用 lease”“没有 outbox 就丢外部消息”“旧 owner 必然覆盖新 owner”等判断：这些并非本例机制或副作用范围。不能把根本不存在的跨系统调用链硬套到此模型。
+
+## 恢复闭环与未验证项
+
+- effect 插入失败：事务回滚提供一致性保障；后续由谁发现仍为 PROCESSING、谁重新调度、退避和重试上限未提供。失败发生时是否自动重试未知，不认定任务必然永久卡死。
+- 事务提交前崩溃：给定原子性契约应防止半提交，但实际持久化库的恢复与再次执行未测。
+- 事务提交后响应丢失：重复调用按条件更新应无新增副作用；响应协议、重试调用方和状态读取路径未提供。
+- 并发锁冲突：没有并发执行记录，异常是否被上层捕获和重试未知。
+- 检测与运维：没有告警、积压扫描、人工重放入口、恢复责任人和 RTO 材料；属于证据缺口，不是已确认缺陷。
+- 数据范围：没有异常历史数据写入或其他 writer 的证据；无法证明任意 writer 都遵守相同事务，也不能虚构不一致历史记录。observed 未输出最终 status，需补直接查询验证终态。
+
+## 最小回归与验收计划（未执行）
+
+只读要求下不运行任何写数据或故障注入探针。下列均为后续隔离环境测试设计，不是本次通过结果：
+
+1. 正常及顺序重试：查询 job.status、effect 数量、影响行数；应分别为 COMPLETED/1/[1,0]。
+2. UPDATE 成功后令 INSERT effect 失败：应抛错并回滚，状态仍 PROCESSING、effect=0；取消故障后重试可完成，最后 effect=1。
+3. 两独立连接竞争同一 job：同步起跑，断言最多一次成功、effect=1；若出现锁错误，验证上层重试最终收敛。不能只检查最终计数而忽略永久未完成。
+4. 隔离持久化数据库的进程故障：提交前退出，重启后无半提交且可重试；提交后响应前退出，重启重试无重复 effect。内存库不能承担此项验收。
+5. 验证真实调用方和调度器：失败后的任务可被再次发现，明确责任人、重试策略、人工入口和 RTO；保留真实结果与告警证据。
+
+没有代码修复治理包。按“正常/回滚证据 → 并发 → 持久化崩溃恢复 → 调度与 RTO”补齐验收即可；只有出现真实违约再按根因修复。未授权实施或发布，无需设计本次代码回滚；后续如改动，需另验事务、幂等契约、旧调用方兼容及回滚版本行为。
+
+## 本次实际命令与结果
+
+工作环境：Windows PowerShell；只读命令均退出码 0。
+
+1. `Get-Content -LiteralPath '<evaluation-root>\E11\skill\SKILL.md' -Raw`：先加载技能成功。
+2. `Get-Content -LiteralPath '<evaluation-root>\E11\request.md' -Raw`：确认只读审计及合成材料边界。
+3. `Get-Content -LiteralPath '<evaluation-root>\E11\skill\references\audit-sop.md' -Raw`：读取参考矩阵，采用状态、事务、恢复、反证部分。
+4. `rg --files '<evaluation-root>\E11\workspace' '<evaluation-root>\E11\artifacts'`：只列出 contract.md、observed.json、scenarios.py。
+5. 实际批量编号阅读命令：
+
+```powershell
+$auditPaths = @('<evaluation-root>\E11\artifacts\contract.md','<evaluation-root>\E11\artifacts\observed.json','<evaluation-root>\E11\artifacts\scenarios.py'); foreach ($auditPath in $auditPaths) { Write-Output $auditPath; $auditLine=0; Get-Content -LiteralPath $auditPath | ForEach-Object { $auditLine++; '{0,4}: {1}' -f $auditLine, $_ } }
+```
+
+结果：契约 1 行、observed 8 行、scenarios 102 行；关键范围如上。
+
+6. `Get-ChildItem -LiteralPath '<evaluation-root>\E11\workspace' -Force -Recurse | Select-Object FullName,Length,Attributes`：无输出，workspace 为空。
+7. `Get-FileHash -Algorithm SHA256 -LiteralPath '<evaluation-root>\E11\artifacts\contract.md','<evaluation-root>\E11\artifacts\observed.json','<evaluation-root>\E11\artifacts\scenarios.py' | Format-List Path,Hash`：结果见输入哈希表。
+
+没有运行 scenarios.py、数据库测试、并发或故障注入；没有访问共享或生产服务。本次是材料审计，没有新增运行测试通过结论。
+
+## 大白话解释
+
+这里 PROCESSING 表示“事情还没办完”，不表示“某人已经拿到租约”。数据库负责把“改成完成”和“写入业务结果”一起落地；第二次处理因任务已完成而不会再写结果。材料已经说明这种设计允许租约为空，真正还需补测的是多人同时处理和进程突然退出后的恢复。
+
+## Executive Summary
+
+【目标】只读审计无租约任务的状态与完成处理。
+【改动文件】仅本例 report.md；输入与用户仓库未改。
+【风险】合成记录不代表生产；并发、崩溃、恢复责任与 RTO 未验证。
+【必须验收】直接查询终态；插入失败回滚；多连接竞争；持久化重启及任务重试。
+【结论】PROCESSING+lease=null 符合契约；未确认可达缺陷。现有证据支持顺序幂等，不能宣称完整恢复已通过。

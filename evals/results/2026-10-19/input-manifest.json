@@ -1,0 +1,130 @@
+{
+  "provenance": "All artifacts are synthetic evaluation material; no production evidence is claimed.",
+  "skill_hashes": {
+    "SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834",
+    "references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d"
+  },
+  "fixture_hashes": {
+    "cases.json": "781140d646a4de3f58aef75565a9f1bfb7c8977bc0999396df6f539063c71eea",
+    "observations.json": "2797f75914b29a7a26457a60213ad87d35bfed4bc971a0254f0b3615f396930e",
+    "scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1"
+  },
+  "cases": {
+    "E01": {
+      "input_hashes": {
+        "request.md": "c05bb2e9ce4616120339f8d29f6609f0dbb37b37abb365c7f68c5be23ed4664b",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E02": {
+      "input_hashes": {
+        "artifacts/complete.sql": "8677964b49075b74f42f6975a1ef9d7675e5c8ede2f8d451fbb78d95c657a18e",
+        "artifacts/contract.md": "af6f0f50fe933d194767a3740ac2203cb6350397188b1d0849b702b26adea5e1",
+        "request.md": "3af95daa3a517f52ef8a0ac4295bb460e1a430942420b9d95de5041fcc66c296",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E03": {
+      "input_hashes": {
+        "artifacts/contract.md": "d58b0e50accc625d297038d64f5f42116890d395a4f37e8ee678acc804036ac5",
+        "artifacts/observed.json": "74ddd459eb9f480b145b5b3a3da881c7449fd64ecad55ca4d5bc2b2d00fa1101",
+        "artifacts/scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1",
+        "request.md": "3da8fe4f2d32e23e3ddccd701c1ee994fb8112d22d8dcc06f873453de94f8a1f",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E04": {
+      "input_hashes": {
+        "artifacts/contract.md": "77c34925237589f5a9e45d2df8e114b5730d0e62270529a40edc13565a240f10",
+        "artifacts/observed.json": "4640b33da6483cc834db5b60315a0b64b89c5c6ccd00304436af8b1c085f6626",
+        "artifacts/scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1",
+        "request.md": "96d53d07cc8e0e8597e2013be10f1625191633f92385f2996e2959b755c36599",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E05": {
+      "input_hashes": {
+        "artifacts/contract.md": "93cddb1ed8edecb8fc0bee76ec7a1d1abba3a6dc6f84fe4b730e76128666c0ed",
+        "artifacts/observed.json": "72449e22318f06fcf559847888320d7a2ab8b2681bfc7101a6e4fea5744cc802",
+        "artifacts/scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1",
+        "request.md": "95f62e1b05f249cb1b752044b82fe073e6c0083f39c897a5dec0a5b2be23a1cf",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E06": {
+      "input_hashes": {
+        "artifacts/contract.md": "d4f497aa0093aa48a2409a650563cb8a27c94e3678ef4e5a251fc0963697b710",
+        "artifacts/observed.json": "8293420969f6f0d2dd03bb7d610016f5d3c8889baffc81059e73e2de2543aa9c",
+        "artifacts/scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1",
+        "request.md": "6e3fef4eb04e1fede80fa1830a8292e2d187bc98e1d0fa436d590193cea94e8e",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E07": {
+      "input_hashes": {
+        "artifacts/contract.md": "2636dd476eac1ac88ace4767f6f6cfc27016934900b530c20b856349da8ec3ac",
+        "request.md": "2cf4b3fbed6500c72d05c75683dafad56b5e0f00cf519b4b9bc4fe7471db5c30",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834",
+        "workspace/existing_smoke.py": "3bd360c4991dca52f2c97cef034a833223311ccce0348e8fe945e777c15441ca",
+        "workspace/worker.py": "cc8c117ab39a92f5448582bb113eea758c5fbb252da57eba9358f36f2fc536e5"
+      },
+      "git_status_before": " M worker.py\n"
+    },
+    "E08": {
+      "input_hashes": {
+        "artifacts/contract.md": "b9d7f33f4dfa9563a17e27d554100cc0faf01aa4854dbfc55ca45d9303b120ad",
+        "artifacts/observed.json": "8407a2a8e0aee80482bda416933f342238a45d14179d938fc9a4f2faf5855d50",
+        "artifacts/scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1",
+        "request.md": "8d187553aa98bd97bcd4654b919eb3bdf572a49807f84d03c9ed1200ca7fb76f",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E09": {
+      "input_hashes": {
+        "artifacts/ledger.json": "db91e89034648817df5d7f3924cf860b2a845202ffd7393af280071faae181af",
+        "artifacts/scope.md": "2af2629229bdebbd62490479cae3290b1a0b9c6d3a0270e41cfb27c7512b3d59",
+        "request.md": "6c36b3bac2a8c52299bd95f078663e980a68c1931100ec5da3bd9958418c9516",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E10": {
+      "input_hashes": {
+        "artifacts/contract.md": "9a9ce2c5250487294514cb97e9feefdb3c76b05685340813bb49b8fbf3fb6087",
+        "artifacts/observed.json": "74ddd459eb9f480b145b5b3a3da881c7449fd64ecad55ca4d5bc2b2d00fa1101",
+        "artifacts/scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1",
+        "request.md": "862cf23efb22bc1cd927e2bec99c676dad77d57e9f2f0787dfe3dd6e64fd1ee3",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    },
+    "E11": {
+      "input_hashes": {
+        "artifacts/contract.md": "c9e56df5c4d3e56dd6316e94fe609e5aa660f5fa3322dd8f7aa23722575f5088",
+        "artifacts/observed.json": "0afbcbcf1298772aad459220ab61e6025d47363a29203b9121f246c11cf95fdc",
+        "artifacts/scenarios.py": "9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1",
+        "request.md": "11b3b717eb3aae47046971d5f1e1c1d3f48d3cd851f27ec765538bb1295c6e93",
+        "skill/references/audit-sop.md": "5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d",
+        "skill/SKILL.md": "842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834"
+      },
+      "git_status_before": null
+    }
+  }
+}

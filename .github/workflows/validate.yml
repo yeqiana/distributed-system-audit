@@ -1,0 +1,29 @@
+name: Validate Skill
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install validation dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Validate skill package
+        shell: pwsh
+        run: ./scripts/test-skill.ps1
+      - name: Test release rejection and archive installation
+        run: python -m unittest discover -s tests -v
+      - name: Build install archive
+        run: python scripts/test_skill.py --package dist/distributed-system-audit-v0.1.0-rc1.zip

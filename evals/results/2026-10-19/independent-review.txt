@@ -1,0 +1,57 @@
+# 独立评审：distributed-system-audit
+
+结论：当前技能规则、SOP、打包实现和固定行为材料中，未发现有足够可达性及证据支持的必须修复缺陷。可继续最终候选包验收；本报告不声明宿主调用、模型行为或远程 CI 已通过。
+
+## 范围与方法
+
+- 目标：`<repository>` 的通用跨组件正确性与恢复审计能力及发布材料。
+- 逐项阅读入口、SOP、双语 README、三份 prompts、合成示例、行为契约/流程、11 个固定案例、执行器、观察记录、两个实现脚本、两组测试、CI 与发布说明。
+- 应用 ai-coding-collaboration 的证据式评审规则。只读核查用户仓库；测试使用 `-B` 禁止 Python 缓存，修改/解压/生成归档仅在自动清理的外部临时目录。未访问生产/共享服务，未阅读其他代理报告。
+
+## 按严重度的发现
+
+没有已确认的 Blocker / Major / Minor 源码或规则缺陷，不以泛化建议凑数量。
+
+曾发现历史产物 `dist/distributed-system-audit.zip` 与现源码不一致：缺少 5 个新行为评测文件，8 个文件字节不同；现版校验器对其解压目录报 5 项 required-file 缺失。触发入口为 `README.md:71` 的旧 ZIP 安装示例。评审协调方已明确：两个原 ZIP 是前序历史产物，最终交付改用 `dist/distributed-system-audit-v0.1.0-rc1.zip`，并同步 README/CI。因此这项列为已澄清的历史产物问题，不列为最终候选包缺陷。最终包仍需按 `docs/release-checklist.md:14` 逐文件验收。
+
+## 验证命令与结果
+
+工作目录为目标仓库，Python 3.12.10 / Windows。
+
+1. `python -B scripts/test_skill.py`：通过，27 个源文件；输出明确标注 Model behavior not evaluated。
+2. `python -B -m unittest discover -s tests -v`：15/15 通过。包括坏包拒绝、源目录输出阻止、ZIP 不覆盖、解压安装字节一致、隔离工作区 dirty baseline 保留、11 例固定输入与合成观察可复现。
+3. 以 `python -B -` 导入当前 `scripts/test_skill.py`，在 `TemporaryDirectory` 调用 `create_package(root, temp/'fresh.zip')`，再 `ZipFile.extractall()`、`testzip()` 和 `validate(installed)`：27 个归档成员，CRC 检查返回 None，解压后静态错误为 `[]`。临时目录已自动清理。
+4. 对现存历史 ZIP 执行同样解压校验及逐文件字节比较，确认上述历史包差异；没有改写历史 ZIP。
+5. 结束前再次调用 `validate(root)`：`[]`。
+
+核查时 Git 状态为尚未提交的整套仓库文件。评审未在目标仓库内编辑/新增文件；其他并发工作的变化不归因于本次评审。
+
+## 具体边界与剩余验收
+
+- 规则能区分真实观测、源码推断、合成记录和未知项；明确只读边界、现有授权、已有 dirty work 保留、反证、根因合并和恢复关闭条件。
+- 案例含正例和反例：未受保护/受保护的旧 worker、99/100 投递、Reader 与健康检查不一致、共用 Outbox 根因、允许无 lease 的幂等事务实现。测试证实固定观察与执行器一致；这证明材料可复现，不证明代理行为通过。
+- 没有在本次独立评审执行 11 个受测代理，亦未查看其报告；故对 `evals/manual-evaluation.md:17` 的 11/11 行为门禁不作判定。宿主发现/实际调用、Linux 和远程 CI、本次最终 RC1 ZIP 尚待各自证据；对应发布清单 `docs/release-checklist.md:17-18,24-25`，现有文档没有把它们预写为通过。
+- 正式发布应绑定最终文件哈希和 ZIP；本报告仅覆盖以下已读快照。无需为通过本报告改变审计规则或引入新框架。
+
+## 关键快照 SHA-256
+
+```text
+SKILL.md 842dc3d3ff9c0fd2bc08efd0d286fd6efbcd8469192254db1bcce42088c7c834
+references/audit-sop.md 5d311ca922fa10c1cac3f3b78da1ec0153e41801df4fca7198a91995fb35b18d
+scripts/test_skill.py a616e263b47988c1b3dfbb398cfba576b7c7ccf29808651b9425db256b0130c7
+scripts/prepare_behavior_eval.py c0a4ac0cca8600a19e2a87bf3d647e1f588a830f1c3ae2bfa3b8436f82d95edf
+evals/fixtures/cases.json 781140d646a4de3f58aef75565a9f1bfb7c8977bc0999396df6f539063c71eea
+evals/fixtures/scenarios.py 9dd089f8b3954caaa361ff9c468763e97eac16ccf26cf9ec17444e2e55206ef1
+tests/test_package.py 27bd942321b28a805a40326be17cef5d0fd027e890297032c2bd51dff8906940
+tests/test_behavior_fixtures.py 8543efeda063de287adef3a33be3dfaa07d54f6fb6a8dd252d8cf19377d6939a
+```
+
+## Executive Summary
+
+【目标】独立只读评审通用分布式审计 Skill。
+【改动文件】用户仓库无改动；仅保存本报告。
+【风险】历史包已排除；本次未判定模型行为、宿主调用及远程 CI。
+【必须验收】最终 RC1 包解压/逐文件一致，行为证据、真实调用、远程 CI 分别记录。
+【结论】静态及 15 项回归通过，未发现需修复缺陷，可继续最终发布验收。
+
+大白话解释：规则与测试材料对得上，也能打出完整新包；旧 ZIP 不能代表现在的内容。最后发布哪个包、代理实际怎么做，仍要用对应验收记录说话。

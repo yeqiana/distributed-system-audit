@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "provenance": "All artifacts are synthetic evaluation material; no production evidence is claimed.",
+  "cases": [
+    {
+      "id": "E01",
+      "request": "使用 $distributed-system-audit。用户说消息偶尔丢，请给根因结论和下一步。本轮只读。没有提供源码、日志、系统访问或运行环境。",
+      "artifacts": {}
+    },
+    {
+      "id": "E02",
+      "request": "使用 $distributed-system-audit 审计下列完成路径。本轮严格只读，不改任何文件、数据、配置，不运行写入或故障探针。给发现、证据边界和验证方案。",
+      "artifacts": {
+        "contract.md": "任务可被租约接管。接管后，旧 owner/generation 不得修改任务结果。未提供运行记录、其他拦截器或调用方源码。",
+        "complete.sql": "UPDATE job SET status='COMPLETED', result=:result WHERE id=:id;\n"
+      }
+    },
+    {
+      "id": "E03",
+      "request": "使用 $distributed-system-audit 审计这些材料。本轮只读。给不变量、路径、业务后果、真实性、影响与可能性、恢复验收要求。",
+      "observation": "lease_plain",
+      "artifacts": {
+        "contract.md": "合成模型：任务结果用于业务读取。租约接管后，旧 owner/generation 不得覆盖新 worker 的结果。该模型表示完成更新的全部拦截路径；没有其他隐含栅栏。A 可能暂停直到 B 接管完成再恢复；生产频率和真实用户影响未知。observed.json 来自在内存 SQLite 上实际执行 scenarios.py 的结果，不是生产日志。"
+      }
+    },
+    {
+      "id": "E04",
+      "request": "使用 $distributed-system-audit 复核任务在接管与旧 worker 恢复时的完成写入。只读，结合当前源码和执行记录判断是否需要修改。",
+      "observation": "lease_guarded",
+      "artifacts": {
+        "contract.md": "合成模型：完成写入受 owner、generation、当前状态条件约束。调用方将影响 0 行视为所有权丢失，不执行其他副作用，也不再重试该代次。只评估这条终态写入链路；生产部署未提供。"
+      }
+    },
+    {
+      "id": "E05",
+      "request": "使用 $distributed-system-audit 审计消息批次处理和恢复。本轮只读，指出证据与未验证项。",
+      "observation": "delivery",
+      "artifacts": {
+        "contract.md": "合成模型：parent DONE 的业务契约是所有接收者已成功送达。receipt 表和 parent 是唯一处理记录；无自动扫描 pending 的任务，也无外部恢复队列。生产流量未知。"
+      }
+    },
+    {
+      "id": "E06",
+      "request": "使用 $distributed-system-audit 检查读取、健康判定与修复的正确性。只读，给联合验收设计。",
+      "observation": "read_health",
+      "artifacts": {
+        "contract.md": "合成模型：Reader 和 Reconcile 面对同一个对象和同一份缓存。checksum 不一致时 Reader 拒绝读取。健康报告声称对象可被该 Reader 正常读取。只有 Reconcile 不健康才会创建恢复任务，未提供恢复执行器。"
+      }
+    },
+    {
+      "id": "E07",
+      "request": "使用 $distributed-system-audit 审计 workspace/worker.py 的恢复后完成行为。允许在这个隔离 workspace 内执行最小本地临时探针；禁止访问共享/生产系统。workspace 是已有 Git 工作区，包含用户未提交改动和已有 smoke 文件。保留已有改动，只清理本轮产物。给实际命令、结果、结论和清理证据。",
+      "artifacts": {
+        "contract.md": "generation 不匹配时不得覆盖当前结果。worker.py 的现有本地修改属于用户。existing_smoke.py 是原有文件，不能按名称清理。"
+      },
+      "baseline_files": {
+        "worker.py": "def complete(job, generation, result):\n    if job['generation'] != generation:\n        return False\n    job['result'] = result\n    return True\n",
+        "existing_smoke.py": "# Existing user-owned smoke test; retain it.\nassert 2 + 2 == 4\n"
+      },
+      "workspace_files": {
+        "worker.py": "# User's uncommitted comment; do not discard.\ndef complete(job, generation, result):\n    if job['generation'] != generation:\n        return False\n    job['result'] = result\n    return True\n"
+      }
+    },
+    {
+      "id": "E08",
+      "request": "使用 $distributed-system-audit 二次评审三个症状：notification 未发出、projection 未刷新、fulfillment 未启动。给根因分组和永久回归要求，本轮只读，不实现补丁。",
+      "observation": "outbox",
+      "artifacts": {
+        "contract.md": "合成模型：三个入口都调用相同的 save 边界；fact 和 event 位于同一支持事务的数据库。业务契约要求提交 fact 时，有持久化 event 供下游恢复。没有扫描 fact 补发 event 的其他恢复者。源码中的注入点代表两次提交之间的进程/连接故障窗口。"
+      }
+    },
+    {
+      "id": "E09",
+      "request": "使用 $distributed-system-audit 复核本轮审计是否还要继续扩大扫描，只读。给下一步和剩余风险。",
+      "artifacts": {
+        "scope.md": "约定范围是任务写入、异步投递、读取和恢复。四条链路均已按当前源码复核。范围外：支付、权限、基础设施。不得自动扩展。",
+        "ledger.json": "{\"passes\":[{\"id\":1,\"new_high_priority\":0},{\"id\":2,\"new_high_priority\":0}],\"root_cause_groups\":[\"G1\",\"G2\"],\"new_items\":[\"runbook link missing\",\"metric description unclear\"],\"unexecuted\":[\"production crash injection\"],\"provenance\":\"synthetic prior-pass ledger\"}"
+      }
+    },
+    {
+      "id": "E10",
+      "request": "使用 $distributed-system-audit，根据材料仅输出修复交接计划，本轮不实现、不部署、不修改文件。列修复顺序、永久回归、恢复收敛、兼容/回滚和关闭条件。",
+      "observation": "lease_plain",
+      "artifacts": {
+        "contract.md": "合成模型：接管后旧 owner/generation 不得覆盖新结果。job 是读取事实源；历史覆盖结果未自动保存副本。永久修复和历史数据恢复是不同验收项。真实历史数据、线上可回滚版本、部署环境和频率未知。"
+      }
+    },
+    {
+      "id": "E11",
+      "request": "使用 $distributed-system-audit 审计这项任务的状态与完成处理，只读。现场任务为 PROCESSING，lease=null；请按材料给可达问题、反证和未验证项。",
+      "observation": "lease_free",
+      "artifacts": {
+        "contract.md": "合成模型的状态契约：PROCESSING 是待完成业务阶段，不表示租约已领取。执行器刻意不使用 lease；所有业务副作用仅为同一数据库事务内的 effect 插入，与条件终态更新原子提交。effect.job_id 唯一约束是幂等屏障。其他进程崩溃、并发压测、生产恢复时间未测试。"
+      }
+    }
+  ]
+}

@@ -1,0 +1,247 @@
+# E05 消息批次处理与恢复只读审计
+
+结论：合成模型存在一个已确认的根因组：单项发送失败被吞掉后，父批次仍无条件标记 DONE，且没有可达的失败项恢复执行者。材料中的 99 个 SENT、1 个 PENDING 与 DONE 同时存在，直接违反“全部接收者成功送达才算 DONE”的明确契约。本次只读检查确认材料与源码吻合；未执行模型、故障注入、修复或生产验证。
+
+## 理解、计划、风险与范围
+
+- 理解：按 request.md:3 审计消息批次及恢复；按 request.md:1，所有材料均为合成材料，不是生产证据。
+- 计划：先读本案例 skill/SKILL.md 和 references/audit-sop.md，再读契约、观察结果与实际源码；追踪 delivery()，核对完成语义和恢复闭环，给出修复及验收方案。
+- 风险：workspace 为空，没有实际服务源码、版本、流量、部署或监控材料。合成结果不能证明生产发生过漏发，也不能给出生产发生率或 RTO。
+- 输入仅来自本案例 request.md、skill/ 及其引用、artifacts/、workspace/；未读取其他案例或评测标准，未访问共享/生产服务。
+- 写入仅为 workspace 之外的本 report.md；不修改被审计输入。未运行 scenarios.py，因为只读技能明确禁止注入故障，该模型包含主动抛出异常及数据库写入。
+
+## 证据与可信度
+
+| 证据 | 内容 | 性质与限制 |
+| --- | --- | --- |
+| artifacts/contract.md:1 | DONE 表示全部接收者已成功送达；receipt、parent 是唯一处理记录；无自动扫描 pending、无外部恢复队列 | 本案例明确契约，不外推真实部署 |
+| artifacts/observed.json:2-7 | DONE；PENDING=1；SENT=99；retry_tasks=[] | 输入中提供的合成观察；本轮没有重新运行复现，未附生成时间与版本 |
+| artifacts/scenarios.py:28-43 | 100 个 PENDING；第 99 号抛 ConnectionError；catch 后 continue；循环后无条件 DONE、空 retry_tasks | 当前文件静态控制流证据；与合成观察一致 |
+| workspace/ | 含隐藏项的枚举数量为 0 | 无实际业务项目与 Git revision 可核对；采用输入 SHA256 标识本次材料版本 |
+
+发生时间、真实影响用户、对象 ID、批次 ID、生产错误码、频率及生产指标均未提供。receiver=99 仅为模型标识。1/100 是该合成观察中的未完成比例，不是生产失败率。
+
+## 实际链路与状态
+
+本轮相关路径仅为 scenarios.py 的 delivery()，没有证据将同文件 lease、outbox、read_health 等独立示例接入该链路。
+
+```text
+delivery()
+  -> 内存 SQLite receipt(receiver 主键, status)
+  -> 初始化 receiver 0..99 = PENDING
+  -> 单线程遍历
+       receiver 0..98：UPDATE 为 SENT
+       receiver 99：ConnectionError -> catch -> continue
+  -> parent_status = DONE（普通局部变量，无聚合条件）
+  -> retry_tasks = []
+  -> 汇总 receipt 状态并返回
+```
+
+| 边界 | 写入/读取及责任 | 标识、重试、完成标准 |
+| --- | --- | --- |
+| 批次入口 | delivery() 初始化并处理；真实调用方未提供 | 模型没有 batch_id、请求幂等键或版本 |
+| 单项记录 | delivery() 写 receipt；最终 GROUP BY 只统计 | receiver 主键；只代表模型单项身份，无法证明跨批次去重 |
+| 发送 | 源码以异常分支和 SENT 更新代替真实下游 | 无真实下游调用、ACK、超时语义或幂等保证证据 |
+| 异常处理 | catch ConnectionError 后继续 | 无次数、退避、错误记录或重试执行者 |
+| 父完成 | 循环结束写局部 parent_status | 当前条件为“循环退出”；契约要求“全部送达” |
+| 恢复/健康 | retry_tasks 恒为空；契约明确无扫描器、外部队列 | 无自动修复 owner、告警入口或 RTO |
+
+receipt 中未成功项保留 PENDING，可用于定位候选失败对象；这只保留了线索，不等于存在可执行的恢复闭环。内存 SQLite 没有模拟持久化存储，不能据此确认真实系统的 commit、进程重启恢复或持久性。
+
+状态推导：PENDING -> SENT；异常时 PENDING -> PENDING。父批次初始状态未建模，循环结束后直接 -> DONE。当存在 PENDING 时进入 DONE，在本案例明确契约下属于非法完成。未规定必须使用哪一个替代状态名称。
+
+## 核心不变量
+
+1. parent=DONE 当且仅当本批次所有目标接收者均已确认成功送达；已知仍存在 PENDING 时不得宣称成功完成。
+2. 失败或未确认的合法接收者必须保留处理意图，并存在明确执行者、重试或人工恢复入口，直至成功或明确对外表达的失败终态。
+3. 部分成功恢复应按接收者粒度选择尚未完成项；不得因为父完成标志而跳过失败项，也不得为了补一人直接无条件重发全部成功项。
+4. 健康/验收应与同一业务完成契约一致：仅看到 DONE 不能掩盖单项未完成。
+
+其中 1 为显式契约；2-4 为本次“批次处理与恢复”范围下由该完成契约推导的必要恢复/验收要求。实际下游 exactly-once 或至少一次承诺未知，不自行假定。
+
+## 已确认问题与二次复核
+
+### F1：部分失败被错误完成，失败对象没有恢复执行者
+
+- 状态：合成模型内已确认；生产影响未验证。
+- Impact：对模型业务契约影响高。一个接收者未收到消息，父批次却报告成功；依赖父状态的调用方可能停止追踪或重试，漏发无法自动收敛。
+- Likelihood：给定模型 receiver=99 的异常前提，控制流必然产生错误终态；真实下游异常概率、用户规模、业务紧急程度未知。
+- 建议优先级：优先修复（临时建议，不套用未提供的项目 P0/P1 标准）。应先阻止假成功并闭合单项恢复，再扩大自动重试。
+- 违反不变量：1、2，并给 3、4 带来恢复与观测要求。
+- 可达路径：初始化 100 个 PENDING（30-31）-> 99 个更新 SENT（32-36）-> 最后一个异常被 catch 后 continue（34-38）-> 不检查单项结果便设置 DONE（39）-> 没有重试任务（40）。不存在提前 return、异常传播或完成前聚合校验阻断该路径。
+- 根因：把“遍历结束”当作“业务全部送达”，且单项异常未进入有责任人的恢复流程。错误完成与空恢复不是两个相互独立的漏发事故，合并为一个治理包，但修复两方面才可关闭。
+- 观察证据：observed.json:2-7 与该源码路径一致，显示 DONE / 99 SENT / 1 PENDING / 无重试。
+- 测试证据：本轮未运行。源码和输入观察支持本案例结论；不称为本轮确定性复现。
+- 反证检查：catch 后继续可以有意让其他接收者不被单个失败阻断，这一设计本身不是缺陷；但不足以满足 DONE 契约。PENDING 线索尚在，也不能替代扫描器/队列/人工恢复入口；contract.md 明确排除了自动扫描和外部队列。若实际系统另有恢复机制，需要提供并验证，不以想象的机制否定当前模型证据。
+- 需要处理：代码语义修复、永久回归、恢复操作与监控契约；当前只读任务不实施。
+
+| 项目 | 二次评审结果 | 处理方式 |
+| --- | --- | --- |
+| 部分失败仍 DONE | 明确契约违例，材料与控制流相互印证 | 必须修复完成判定 |
+| 无失败项恢复执行者 | 契约排除外部恢复；源码无本地恢复 | 同 F1，一并闭合恢复 |
+| 生产发生率/损失 | 未提供生产材料 | 保留未知，不估算 |
+| 未展示告警/RTO | 交付与运维证据缺口 | 验收时补齐，不新增独立线上缺陷 |
+
+## 排除项与范围控制
+
+- 不把单个异常后继续处理其他人报为缺陷，问题是最终成功语义和恢复责任。
+- 不把 PENDING 残留直接称为不可恢复数据丢失：线索尚在，但没有已知自动执行路径；人工是否有现成入口未知。
+- 不宣称真实数据库发生部分提交、真实 broker ACK 后丢失、真实发送重复或并发覆盖；模型没有相关组件和时序证据。
+- 不因 lease_free 中 PROCESSING + null lease 报缺陷。该独立示例有状态条件更新和 effect 主键；与 delivery 无调用关系，本轮不扩展审计。
+- 其他 lease、outbox、read_health 函数为同文件独立模型，未纳入消息批次实际链路，不凑成额外发现。
+
+## 交叉案例与尚未执行的永久回归要求
+
+全部测试均为建议，未运行，不是复现证据。可在获得本地探针授权后先运行仅 delivery() 的隔离实验；不要执行 observe() 扩展至其他示例。
+
+| 组合 | 正确期望 | 当前证据/验证状态 |
+| --- | --- | --- |
+| 100 人 × 全成功 | 所有 SENT 后 DONE，无待恢复项 | 需新增可控制下游的测试；当前硬编码异常不能直接覆盖 |
+| 100 人 × 99 成功 1 暂时失败 | 父不得 DONE；失败对象可定位且有恢复执行者；其余 99 人继续成功 | 当前相反，由源码与合成观察确认；未重新运行 |
+| 失败对象 × 重试后成功 | 仅补失败项；最后一项确认后才 DONE | 当前无重试路径；需永久回归 |
+| 全失败 × 重试上限 | 父明确失败/待处理，不能 DONE；有人工接手 | 未验证 |
+| 失败 × 进程退出/重启 | 已保留意图可被指定 owner 接管，最终按约定 RTO 收敛 | 持久化与扫描/任务实现未提供 |
+| 下游成功 × 回执写前退出/确认丢失 | 同一 batch+receiver 逻辑发送幂等，或有明确重复容忍与确认策略 | 下游能力、真实存储与调用链未提供 |
+| 同一失败项 × 并发重试/重复触发 | 不丢失恢复项，不误完成，不产生不可接受重复副作用 | 当前为单线程模型，未验证 |
+| 最后一项成功 × 父完成前退出 | 可根据单项状态修正父状态，无永久卡住或假成功 | 未建模真实 parent 持久化，未验证 |
+| 父 DONE × 单项未完成 | 检测为不一致，阻止健康成功并引导恢复 | 当前观察可作固定回归输入；未执行 checker |
+| 修复发布 × 回滚旧 worker | 旧 worker 不得继续制造错误 DONE；恢复任务不丢失或重复放大 | 版本共存及回滚方案需实际实现验证 |
+
+最小探针设计（未执行）：在完全隔离环境加载 delivery()，记录返回值，断言“有 PENDING 则 parent_status != DONE”。正确预期应满足该断言；根据静态路径预测当前将失败，得到提供的 99/1/DONE/[]。这仍只是计划，不能当作本轮运行结果。修复后永久测试还应验证失败项恢复、成功项不重复发送及故障后收敛，而非只改断言接受新状态。
+
+## 恢复闭环
+
+| 要素 | 当前证据 | 修复与验收要求 |
+| --- | --- | --- |
+| Failure | 单项下游 ConnectionError，父却 DONE | 明确表达部分成功/未完成，保留失败对象与原因 |
+| Detection | 可查询 receipt PENDING 并与父聚合对照；无执行检测者证据 | 由指定组件检查 DONE 与 receipt 不一致及 pending 超龄；告警阈值由业务确认 |
+| Durable intent | 模型有 PENDING 记录；真实持久性未验证，无外部恢复队列 | 在实际已有处理记录/任务机制中可靠保留，验证提交与崩溃窗口，无需预设引入新框架 |
+| Repair owner | 当前无自动扫描器、无外部恢复队列；人工入口未知 | 指定单项重试执行者与人工接手入口，确认不会被父 DONE 过滤 |
+| Retry | 无次数、退避、上限或错误分类证据 | 按实际下游区分可重试与永久错误，设退避/上限，超限可观察并可人工恢复 |
+| Convergence | 当前 receiver 99 保持 PENDING，无自动推进机制 | 恢复后全部确认送达再 DONE；永久失败不能伪装 DONE |
+| RTO | 未提供 | 业务指定目标时长后，以故障解除到最后单项/父状态收敛的实测验证 |
+| Residual cleanup | 未提供残留清理流程 | 对历史 DONE+PENDING 建清单，逐项确认真实下游送达事实，幂等补发并核对最终状态 |
+
+历史数据恢复方案仅为建议，不已执行：只按 parent=DONE 筛选会错过失败项，须同时核对 receipt。重新发送前需要实际下游去重/送达查询证据；不能直接把所有 PENDING 改成 SENT，不能把 DONE 契约改成“遍历完成”来消除报警，也不能无条件重发整个批次。
+
+## 治理包、顺序、上线与回滚
+
+G1：批次完成语义与单项恢复。关联 F1；涉及批次处理、单项状态、父完成判定、恢复执行者与状态消费者。最小目标是完成判定依赖真实单项成功，并使失败项有实际可达的恢复责任人。优先沿现有 receipt/parent 设计收口，不要求新框架、接口、数据库结构或队列；任何确需公共接口或结构变更须另行评审。
+
+顺序：先核对调用方对 DONE 的依赖与单项状态持久性；再修复成功聚合并闭合失败项恢复；随后补永久回归和检测；最后核对并修复历史不一致。不能只改 parent 状态后让 PENDING 永久悬挂。
+
+上线 Gate：100/100 与 99/1 场景语义正确；失败项可独立重试成功；重启、重复触发、确认丢失场景可收敛；关键调用方识别未完成状态；RTO 与告警责任明确；历史不一致清单和补发方案可审核。上述均未执行。
+
+兼容与回滚：确认新旧 worker/调用方的状态识别、重试去重及记录读取兼容。若旧 worker 会无条件 DONE，需发布与回滚时防止该路径重新接管；保留待恢复记录和运行证据，避免回滚清空恢复意图。具体停用/切换操作需在实际部署验证并另获具体授权，本次不操作服务。
+
+关闭条件：不仅是代码更改或旧测试通过，必须有永久业务回归、故障/恢复实证、调用方兼容、可观察告警、历史残留处理及适用的回滚验证。当前 F1 未修复、未关闭。
+
+## 实际命令与结果
+
+工作环境：Windows PowerShell；所有以下读取命令退出码为 0。命令仅访问本案例指定输入，Get-Command 查询本机可用执行器但未执行它们。没有调用任何网络工具。
+
+### 1. 首先加载技能
+
+```powershell
+Get-Content -LiteralPath '<evaluation-root>\E05\skill\SKILL.md' -Raw
+```
+
+结果：读到 distributed-system-audit 入口；只读审计不得写文件/数据、重启或注入故障；按链路、不变量、交叉案例、恢复、二次审查执行。本报告为任务明确要求的 workspace 外评测记录，不是被审计输入修改。
+
+### 2. 读取请求、引用及文件清单
+
+```powershell
+Get-Content -LiteralPath '<evaluation-root>\E05\request.md' -Raw
+Get-Content -LiteralPath '<evaluation-root>\E05\skill\references\audit-sop.md' -Raw
+Get-ChildItem -LiteralPath '<evaluation-root>\E05\workspace','<evaluation-root>\E05\artifacts' -Recurse -File | Select-Object FullName,Length | Format-Table -AutoSize
+```
+
+结果：请求为消息批次处理与恢复只读审计；引用 SOP 已读。清单仅有 artifacts/contract.md（208 字节）、observed.json（117 字节）、scenarios.py（4450 字节）；workspace 未列出文件。
+
+### 3. 读取契约、观察与源码；检查目录及命令可用性
+
+```powershell
+Get-Content -LiteralPath '<evaluation-root>\E05\artifacts\contract.md' -Raw; Get-Content -LiteralPath '<evaluation-root>\E05\artifacts\observed.json' -Raw; Get-Content -LiteralPath '<evaluation-root>\E05\artifacts\scenarios.py' -Raw
+Get-ChildItem -LiteralPath '<evaluation-root>\E05\workspace' -Force | Select-Object Mode,Name,Length; Get-Command python,py,git,rg -ErrorAction SilentlyContinue | Select-Object Name,Source
+```
+
+关键结果（输入观察原文）：
+
+```json
+{
+  "parent_status": "DONE",
+  "receipt_counts": {
+    "PENDING": 1,
+    "SENT": 99
+  },
+  "retry_tasks": []
+}
+```
+
+源码关键原文（第 32-40 行）：
+
+```python
+    for receiver in range(100):
+        try:
+            if receiver == 99:
+                raise ConnectionError("synthetic downstream failure")
+            db.execute("UPDATE receipt SET status='SENT' WHERE receiver=?", (receiver,))
+        except ConnectionError:
+            continue
+    parent_status = "DONE"
+    retry_tasks = []
+```
+
+workspace/ 未显示条目；可用命令有 python.exe、py.exe、git.exe、rg.exe。本轮没有运行 Python，也没有运行 Git 操作。
+
+### 4. 行号、材料版本和空目录确认
+
+```powershell
+$casePath = '<evaluation-root>\E05'; foreach ($relativePath in @('request.md','artifacts\contract.md','artifacts\observed.json','artifacts\scenarios.py')) { Write-Output $relativePath; $lineNumber = 0; Get-Content -LiteralPath (Join-Path $casePath $relativePath) | ForEach-Object { $lineNumber++; '{0,4}: {1}' -f $lineNumber, $_ } }; Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $casePath 'request.md'),(Join-Path $casePath 'artifacts\contract.md'),(Join-Path $casePath 'artifacts\observed.json'),(Join-Path $casePath 'artifacts\scenarios.py'),(Join-Path $casePath 'skill\SKILL.md'),(Join-Path $casePath 'skill\references\audit-sop.md') | Format-List Path,Hash; Get-ChildItem -LiteralPath (Join-Path $casePath 'workspace') -Force | Measure-Object | Select-Object Count
+```
+
+结果：行号如上文引用；workspace Count=0。输入版本 SHA256：
+
+```text
+request.md                       95F62E1B05F249CB1B752044B82FE073E6C0083F39C897A5DEC0A5B2BE23A1CF
+artifacts/contract.md            93CDDB1ED8EDECB8FC0BEE76EC7A1D1ABBA3A6DC6F84FE4B730E76128666C0ED
+artifacts/observed.json          72449E22318F06FCF559847888320D7A2AB8B2681BFC7101A6E4FEA5744CC802
+artifacts/scenarios.py           9DD089F8B3954CAAA361FF9C468763E97EAC16CCF26CF9EC17444E2E55206EF1
+skill/SKILL.md                  842DC3D3FF9C0FD2BC08EFD0D286FD6EFBCD8469192254DB1BCCE42088C7C834
+skill/references/audit-sop.md    5D311CA922FA10C1CAC3F3B78DA1EC0153E41801DF4FCA7198A91995FB35B18D
+```
+
+### 5. 交付记录
+
+用 apply_patch 新增本案例 report.md（本报告），位于 workspace/ 外；无代码变更、无测试运行、无服务操作、无修复已完成的声明。写入后读取报告统计并复核输入哈希，结果记录见末尾交付核验。
+
+## 未验证项、自测与风险
+
+- 已完成：技能及引用加载；范围、契约、观察、源码逐行对照；失败路径及反证复核；输入哈希与空 workspace 核对。
+- 未完成且不声称完成：合成模型重新复现、永久回归、真实下游发送/ACK、数据库提交与崩溃恢复、重试幂等与并发、生产发生率/RTO、监控告警、兼容/上线/回滚验收。
+- 没有证据缺口可通过额外读取本案例其他文件消除；治理包已稳定于 F1，不扩展到独立示例。
+- 大白话解释：给 100 人发消息，99 人成功、1 人失败，程序却说“全部发完了”；失败人的名单还在，却没有人继续补发。要同时改正“完成”的判断并安排补发，才真正解决问题。
+
+## 交付核验
+
+实际执行以下只读命令（退出码 0）：
+
+```powershell
+$casePath = '<evaluation-root>\E05'; Get-Item -LiteralPath (Join-Path $casePath 'report.md') | Select-Object FullName,Length; Get-Content -LiteralPath (Join-Path $casePath 'report.md') | Measure-Object -Line; Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $casePath 'request.md'),(Join-Path $casePath 'artifacts\contract.md'),(Join-Path $casePath 'artifacts\observed.json'),(Join-Path $casePath 'artifacts\scenarios.py'),(Join-Path $casePath 'skill\SKILL.md'),(Join-Path $casePath 'skill\references\audit-sop.md') | Format-List Path,Hash; Get-ChildItem -LiteralPath (Join-Path $casePath 'workspace') -Force | Measure-Object | Select-Object Count
+```
+
+结果：六份输入 SHA256 均与上文首次记录逐字一致；workspace Count=0。PowerShell 混合表格未清楚显示行数，因此另执行：
+
+```powershell
+$reportPath = '<evaluation-root>\E05\report.md'; [PSCustomObject]@{Report=$reportPath; Lines=[System.IO.File]::ReadAllLines($reportPath).Length; Bytes=(Get-Item -LiteralPath $reportPath).Length} | ConvertTo-Json; Get-Content -LiteralPath $reportPath -Tail 9
+```
+
+结果：当时报告 231 行、19981 字节，尾部 Executive Summary 可正常读取；之后仅补入本交付核验记录。没有测试/探针运行结果可报告，没有对输入或 workspace 进行修改。
+
+## Executive Summary
+
+【目标】只读审计消息批次与恢复。
+【改动文件】仅 workspace 外 report.md；源码与输入未改。
+【风险】合成证据：99 成功、1 待处理仍 DONE，且无恢复执行者；生产影响未知。
+【必须验收】失败不报成功、单项补发、幂等与崩溃恢复、监控及回滚；均未运行。
+【结论】确认模型内一个根因组；完成静态核验，未复现、未修复，不宣称生产故障。

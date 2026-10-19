@@ -1,0 +1,156 @@
+# E04：接管后旧 worker 完成写入审计
+
+## 结论
+
+在本案例明确的 guarded=true 合成模型与契约范围内，未发现需要修改的完成写入缺陷。A 在 B 接管并完成后恢复，完成 UPDATE 影响 0 行，B 的 owner、generation、终态和结果保持不变。当前源码与提供的执行记录相互吻合。
+
+这是对合成材料的只读复核，不是生产验证或本次重新运行的测试。workspace 为空，没有实际项目、Git revision 或部署证据；不据此证明真实部署安全，也不建议凭空修改代码。
+
+## 理解、计划与风险
+
+- 理解：只评估接管及旧 worker 恢复时的终态写入；按 contract.md，调用方把影响 0 行作为所有权丢失，不执行其他副作用，也不重试该代次。
+- 计划：读取技能与请求，检查当前模型、契约和执行记录，沿所有权变更—完成更新—拒绝处理建立不变量，排除未启用反例，给出必要验收。
+- 风险：执行记录无生成时间、运行环境或 revision 绑定，不能证明它由当前源码实际生成；本次只能确认内容一致。只读要求下不运行会创建/更新 SQLite 状态的场景，不注入故障，不访问任何服务。
+
+## 范围与证据
+
+输入限定为 skill/SKILL.md、其引用 references/audit-sop.md、request.md、artifacts/ 和 workspace/。未使用其他案例、外部标准、记忆或父会话内容。未委派子代理。
+
+| 证据 | 事实与限制 |
+|---|---|
+| request.md | 明确要求只读，结合当前源码与执行记录判断是否需要修改；材料为合成材料，无生产证据 |
+| artifacts/contract.md:1 | 完成写入由 owner、generation、当前状态约束；0 行由调用方解释为所有权丢失，无其他副作用或该代次重试；仅评估终态写入 |
+| artifacts/scenarios.py:8–25 | 内存 SQLite 模型，包含受保护与无保护两种分支；本案记录选择 guarded=true |
+| artifacts/observed.json:1–36 | A claim → B 接管并完成 → A 恢复，A 更新影响 0 行且 B 结果不变 |
+| workspace/ | 含隐藏项的枚举数为 0；没有可进一步沿调用方追踪的工程 |
+
+当前读到的文件 SHA256（用于标识本次检查版本，不代表执行记录与源码已完成来源绑定）：
+
+- scenarios.py：9DD089F8B3954CAAA361FF9C468763E97EAC16CCF26CF9EC17444E2E55206EF1
+- observed.json：4640B33DA6483CC834DB5B60315A0B64B89C5C6CCD00304436AF8B1C085F6626
+- contract.md：77C34925237589F5A9E45D2DF8E114B5730D0E62270529A40EDC13565A240F10
+
+## 实际链路与不变量
+
+1. 模型建立 job(id=1, owner=A, generation=1, status=PROCESSING, result=NULL)，scenarios.py:11–13。
+2. 接管将 owner 改为 B、generation 改为 2，随后 B 条件完成并写入 B-result，:14–16。
+3. A 持有旧 owner=A、generation=1，执行完成更新。guarded 分支以 id、owner、generation、status=PROCESSING 在同一 UPDATE 内判定，:17–22。没有先查后无条件写的时间窗口。
+4. 返回 rowcount 并记录最终行，:22–25。调用方对 0 行的业务处理由 contract.md 给出；完整调用方实现并未提供。
+
+不变量依据 contract.md：
+
+- 只有匹配当前 owner、generation 且处于 PROCESSING 的执行者可以完成该 job。
+- 已失去所有权的 A 不能覆盖 B 的结果或终态。
+- 0 行更新不算业务完成，应结束旧代次，不能继续产生其他副作用或重试该代次。
+
+本案状态路径：A/1/PROCESSING → B/2/PROCESSING → B/2/COMPLETED；A 的旧完成请求被拒绝，状态保持 B/2/COMPLETED。COMPLETED 只能解释为本案定义的完成写入成功，不能外推为不存在于材料中的外部业务效果全部成功。
+
+## 证据对照与交叉场景
+
+| 场景 | 正确期望 | 当前证据 | 判定 |
+|---|---|---|---|
+| B 接管并完成后，A 恢复 | A 影响 0 行，B 结果保留 | observed.json:24–33 实际记录 0 行、B/2/COMPLETED/B-result；源码三个条件匹配 | 提供记录中的场景通过；本次未重跑 |
+| B 接管尚未完成时 A 恢复 | owner/generation 不匹配仍拒绝 A | UPDATE 条件源码支持 | 静态可推导；独立执行未验证 |
+| owner 被复用但 generation 已变化 | 旧 generation 仍被拒绝 | generation 条件源码支持 | 静态可推导；独立执行未验证 |
+| owner/generation 一致但任务已完成 | PROCESSING 条件阻止重复完成覆盖 | status 条件源码支持 | 静态可推导；独立执行未验证 |
+| 当前合法 owner 正常完成 | 首次 1 行，重复请求 0 行 | 同一条件更新的结构支持 | 未提供独立正向/重复执行记录 |
+| A 与 B 的真实并发提交、事务回滚 | 最终只能由有效持有者完成，失效者无额外效果 | 这里只有顺序内存模型 | 未验证，不宣称真实并发通过 |
+
+现有记录里 owner、generation、status 同时不匹配，不能用这一次 0 行结果单独证明每个条件都被独立测试；条件存在的证据来自源码。
+
+## 已确认问题、反证与二次复核
+
+已确认缺陷数量为 0。没有适用的严重等级定义，也没有必要对证据缺口虚设 P0/P1。
+
+- scenarios.py:17 的基础 UPDATE 只有 id，但 guarded=true 在执行前追加了 owner、generation、PROCESSING 条件。不能截取基础 SQL，忽略实际分支后认定旧 worker 可覆盖。
+- lease(False) 是同文件中的无保护对照分支。本案 observed.json:2 明确 guarded=true；不能把对照分支的可能失败当作当前行为。未运行该反例，也未把它写成复现。
+- B 的初始化/接管/完成在模型中为固定顺序，其完成语句没有展开完整生产状态协议；缺少真实调用方时，不将合成设置代码直接定性为生产缺陷。
+- 0 行是按契约预期的拒绝，不是丢任务或必需重试的失败；在 B 已完成的本案中重试 A 反而违背代次边界。
+- delivery、read_health、outbox、lease_free 等函数存在于同文件，但不属于所请求的终态写入链路，没有据此扩展审计或列为发现。
+- 未提供完整调用方源码、拒绝指标和生产部署属于验证边界，不是已证实缺陷。没有证据显示调用方违反“0 行无其他副作用”的明示契约。
+
+二次复核已核对完整条件更新、实际选择分支、结果快照和契约；现有结论稳定。范围限定于这一终态写入链路，不声称全系统无风险。
+
+## 恢复闭环
+
+| 问题维度 | 本案结论 |
+|---|---|
+| Failure | A 在接管后恢复，持有过期的 A/1 身份 |
+| Detection | 完成 UPDATE 的 rowcount=0；记录中可以看到拒绝及未变更的行 |
+| Durable state | B/2/COMPLETED/B-result 保持不变；本案用内存 SQLite，持久化能力不等同生产存储 |
+| Repair owner | 本案 B 已完成，无业务修复需求；A 调用方终止旧代次；接管调度器实现未提供 |
+| Retry/compensation | 根据契约 A 不再重试该代次，无其他副作用，因此本案不需要补偿 |
+| Convergence | A 返回后最终状态仍为 B 的完成结果，提供记录已满足；B 未完成、宕机等其他恢复轨迹未验证 |
+| RTO/告警/人工入口 | 材料未提供；不能臆造恢复时间或告警阈值。当前拒绝路径不需要等待额外修复才能保护 B 结果 |
+
+## 修改建议与必要验收
+
+无需为本案受保护完成路径新增修复治理包，不修改代码、接口、DTO、表结构或配置。应保留这条条件更新及 0 行语义；若未来调整该链路，先确认调用方契约仍成立。
+
+建议永久回归与集成验收（均为后续要求，本次未执行）：
+
+1. 固定 A claim → B 接管 → B complete → A resume 的回归，断言 A 影响 0 行，整行仍是 B/2/COMPLETED/B-result。
+2. 分别覆盖 B 还在 PROCESSING、同 owner 不同 generation、同 owner/generation 但非 PROCESSING、合法首次完成与重复完成，避免单一场景掩盖缺少条件。
+3. 对实际调用方断言 rowcount=0 后不发外部请求、不发布事件、不触发补偿或旧代次重试；实际生产调用方未提供，不声称已验收。
+4. 若要对部署作结论，在隔离环境使用实际数据库方言和事务边界验证真实并发与接管排序，核实部署确实使用受保护更新、generation 不被旧值重用、失败处理与契约一致。测试授权与环境到位后执行，不在共享服务注入。
+5. 本次无代码变更，不涉及发布/回滚。若后续改动，发布 Gate 应含上述永久回归、实际调用方检查和兼容/回滚后仍保留 guard 的验证；不把退回无保护完成写入作为安全回滚。
+
+## 实际执行命令及结果
+
+以下命令均在 PowerShell 执行，仅对所列输入读取。所有命令退出码为 0。独立文件读取使用并行编排，依赖读取按先后进行。未执行 Python、未创建数据库、未访问网络或共享/生产服务。
+
+```powershell
+# 1. 首先读取技能
+Get-Content -LiteralPath '<evaluation-root>\E04\skill\SKILL.md' -Raw
+# 结果：完整技能内容，要求审计优先、只读不注入故障、按范围验证与报告。
+
+# 2. 读取请求、引用模板，并列举审计输入
+Get-Content -LiteralPath '<evaluation-root>\E04\request.md' -Raw
+Get-Content -LiteralPath '<evaluation-root>\E04\skill\references\audit-sop.md' -Raw
+rg --files '<evaluation-root>\E04\artifacts' '<evaluation-root>\E04\workspace'
+# 结果：请求为只读完成链路复核；文件清单仅 scenarios.py、contract.md、observed.json。
+
+# 3. 完整读取材料、含隐藏项检查 workspace
+Get-Content -LiteralPath '<evaluation-root>\E04\artifacts\contract.md' -Raw
+Get-Content -LiteralPath '<evaluation-root>\E04\artifacts\scenarios.py' -Raw
+Get-Content -LiteralPath '<evaluation-root>\E04\artifacts\observed.json' -Raw
+Get-ChildItem -LiteralPath '<evaluation-root>\E04\workspace' -Force -Recurse | Select-Object FullName,Length,Mode
+# 结果：contract 如范围所述；scenarios 完整读取；observed guarded=true；workspace 无输出。
+# observed 关键结果：
+# A_claim: owner=A, generation=1, status=PROCESSING, result=null
+# B_takeover_and_complete: owner=B, generation=2, status=COMPLETED, result=B-result
+# A_resume_complete: affected=0, owner=B, generation=2, status=COMPLETED, result=B-result
+
+# 4. 源码行号、文件指纹、空目录计数
+$casePath = '<evaluation-root>\E04'
+$line = 0
+Get-Content -LiteralPath (Join-Path $casePath 'artifacts\scenarios.py') | ForEach-Object { $line++; if ($line -le 33) { '{0,3}: {1}' -f $line, $_ } }
+Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $casePath 'artifacts\scenarios.py'),(Join-Path $casePath 'artifacts\observed.json'),(Join-Path $casePath 'artifacts\contract.md')
+Get-ChildItem -LiteralPath (Join-Path $casePath 'workspace') -Force | Measure-Object | Select-Object Count
+# 结果：源码行号如本报告引用；三个 SHA256 见证据节；Count=0。
+
+$line = 0
+Get-Content -LiteralPath '<evaluation-root>\E04\artifacts\observed.json' | ForEach-Object { $line++; '{0,3}: {1}' -f $line, $_ }
+# 结果：36 行；第 2 行 guarded=true，第 26 行 affected=0，第 28–32 行 B 结果保留。
+```
+
+报告写入使用 PowerShell 单引号 here-string 与 Set-Content -Encoding utf8，目标仅为案例目录 report.md，位于被审计 workspace 之外。写入后读取文件信息与结尾确认生成；这是任务要求的评测记录，不修改任何输入材料。
+
+## 修改文件、核心改动、自测结果、风险
+
+- 修改文件：仅新增本 report.md；被审计 workspace 与 artifacts 无修改。
+- 核心改动：无实现改动；完成条件、影响行数及拒绝语义的证据复核。
+- 自测结果：只读命令全部成功；没有执行功能测试、并发测试或故障注入。材料提供的合成记录验证的是顺序接管后的拒绝结果。
+- 风险：实际调用方、真实并发/隔离级别、持久化恢复、生产部署及记录来源绑定均未验证。
+
+## 大白话解释
+
+B 已经接手并交了结果。A 醒来还拿着旧工号和旧轮次，数据库核对后不让它覆盖，返回“没改到任何一行”。按材料里的规则，A 看到这个结果就退出，所以这条链路目前没有需要改的证据。
+
+## Executive Summary
+
+【目标】只读复核接管后旧 worker 的完成写入。
+【改动文件】仅案例 report.md；无代码修改。
+【风险】仅合成证据，未验证实际调用方、并发部署与记录来源。
+【必须验收】保持三项条件与0行退出语义，补独立条件和真实调用方回归。
+【结论】记录中 A 更新0行且B结果保留，与源码一致；本范围无已确认缺陷，无需修改。

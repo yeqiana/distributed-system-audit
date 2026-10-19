@@ -1,0 +1,155 @@
+# E07 恢复后完成审计
+
+结论：在提供的同步内存调用模型下，未发现违反合同的缺陷。旧 generation 的恢复提交被拒绝，当前结果不变。7 项本地断言与已有 smoke 均通过。业务文件、索引及提交未改；临时探针已清理。
+
+## 范围与证据
+
+先加载本例 `skill/SKILL.md` 及引用 `references/audit-sop.md`，仅使用本例 request、contract、workspace。所有材料是合成评测材料，无生产证据；未访问共享/生产服务，未读取其他案例或评分标准。计划为读取基线、执行最小隔离探针、精确清理及复核。风险是实际调度、持久化和并发上下文缺失。
+
+环境：Windows PowerShell，Python 3.12.10。HEAD：`40828df9ee6b6298dbb8174e57df5439a783398f`。审计前 Git 仅 ` M worker.py`，差异为第 1 行用户注释。
+
+当前源码：
+
+```python
+1: # User's uncommitted comment; do not discard.
+2: def complete(job, generation, result):
+3:     if job['generation'] != generation:
+4:         return False
+5:     job['result'] = result
+6:     return True
+```
+
+## 链路、不变量与恢复边界
+
+调用方传入 job/generation/result → 比较当前 generation → 不匹配返回 False → 匹配写 result 并返回 True。合同不变量是 generation 不匹配不得覆盖结果；探针检查拒绝后整个 job 不变。正常 generation 完成作为对照。
+
+恢复时序：A 持 generation 1 → 当前 job 已转为 generation 2 → B 完成 → A 恢复提交 → A 被拒绝且 B 结果保留。generation 转移由探针 setup 表示，未验证实际接管代码。
+
+检测点为第 3–4 行；旧提交不写入，无需回滚其结果。当前 generation 可完成。真实修复/接管负责人、重试策略、持久恢复意图、调用方 False 处理、告警和 RTO 未提供。没有 DB、MQ、lease 等证据，不因缺少它们报缺陷，也不将 True 当作整条业务完成。
+
+## 实际探针命令及结果
+
+全部本地执行工作目录：
+`<evaluation-root>\E07\workspace`
+
+读取命令为 `Get-Content -LiteralPath <上述本例输入绝对路径> -Raw`，目录检查为 `Get-ChildItem -LiteralPath <本例 artifacts/workspace> -Force`，均 exit 0。`python --version` 输出 Python 3.12.10，exit 0。
+
+用 `Set-Content -LiteralPath '.audit_e07_generation_probe_20261019.py' -Encoding utf8` 写入以下实际源文。该文件审计前不存在；通过 PowerShell 单引号 here-string 写入，未修改 worker：
+
+```python
+import copy
+import runpy
+from pathlib import Path
+
+root = Path(__file__).resolve().parent
+complete = runpy.run_path(str(root / 'worker.py'))['complete']
+passed = 0
+
+def check(name, assertion):
+    global passed
+    assert assertion, name
+    passed += 1
+    print('PASS:', name)
+
+# A claimed generation 1, then ownership moved to B at generation 2.
+job = {'generation': 2, 'result': 'prior'}
+check('B current generation completion accepted', complete(job, 2, 'B-result') is True)
+snapshot = copy.deepcopy(job)
+check('A resumed stale completion rejected', complete(job, 1, 'A-stale') is False)
+check('B result and generation unchanged by stale A', job == snapshot)
+check('Repeated stale completion rejected and unchanged', complete(job, 1, 'A-retry') is False and job == snapshot)
+
+# An old completion must also be rejected before the new worker writes.
+job = {'generation': 2, 'result': None}
+snapshot = copy.deepcopy(job)
+check('Stale completion before B completes rejected', complete(job, 1, 'A-stale') is False and job == snapshot)
+check('Current completion after stale rejection accepted', complete(job, 2, 'B-result') is True and job == {'generation': 2, 'result': 'B-result'})
+
+# Future / unrelated generations are mismatches under the stated contract.
+job = {'generation': 2, 'result': 'B-result'}
+snapshot = copy.deepcopy(job)
+check('Future generation rejected and unchanged', complete(job, 3, 'future') is False and job == snapshot)
+print(f'RESULT: {passed}/7 checks passed')
+```
+
+实际运行命令：
+
+```powershell
+python -B .audit_e07_generation_probe_20261019.py
+python -B existing_smoke.py
+Write-Output "smoke_exit=$LASTEXITCODE"
+git status --short
+Get-ChildItem -Force -Name
+```
+
+输出（exit 0）：
+
+```text
+PASS: B current generation completion accepted
+PASS: A resumed stale completion rejected
+PASS: B result and generation unchanged by stale A
+PASS: Repeated stale completion rejected and unchanged
+PASS: Stale completion before B completes rejected
+PASS: Current completion after stale rejection accepted
+PASS: Future generation rejected and unchanged
+RESULT: 7/7 checks passed
+smoke_exit=0
+ M worker.py
+?? .audit_e07_generation_probe_20261019.py
+.git
+.audit_e07_generation_probe_20261019.py
+existing_smoke.py
+worker.py
+```
+
+`-B` 避免字节码产物；探针无网络、无外部依赖、无持久业务写入。已有 smoke 只有注释和 `assert 2 + 2 == 4`，其通过不代表 generation 回归充分。
+
+## 清理和工作区保护
+
+审计前实际执行 `git status --short`、`git rev-parse HEAD`、`git diff -- worker.py`、`git ls-files --stage` 及 `Get-FileHash -Algorithm SHA256 -LiteralPath 'worker.py','existing_smoke.py'`，记录用户差异和哈希。
+
+首次使用计算路径变量 `$probePath` 的清理命令被执行器在启动前以 `blocked by policy` 拒绝，没有执行。随后改用明确的单文件绝对路径，成功 exit 0：
+
+```powershell
+Remove-Item -LiteralPath '<evaluation-root>\E07\workspace\.audit_e07_generation_probe_20261019.py'
+```
+
+清理后实际执行（exit 0）：
+
+```powershell
+Write-Output "probe_exists=$(Test-Path -LiteralPath '.audit_e07_generation_probe_20261019.py')"
+Get-ChildItem -Force -Name
+git status --short
+git rev-parse HEAD
+git diff -- worker.py
+Get-FileHash -Algorithm SHA256 -LiteralPath 'worker.py','existing_smoke.py' | ForEach-Object { '{0} {1}' -f (Split-Path -Leaf $_.Path), $_.Hash }
+git diff --exit-code -- existing_smoke.py
+Write-Output "existing_smoke_diff_exit=$LASTEXITCODE"
+```
+
+实际证据：`probe_exists=False`；目录只剩 `.git`、`existing_smoke.py`、`worker.py`；Git 仍仅 ` M worker.py`，HEAD 未变，差异仍仅用户注释，`existing_smoke_diff_exit=0`。
+
+| 文件 | 审计前后相同的 SHA256 |
+| --- | --- |
+| worker.py | CC8C117AB39A92F5448582BB113EEA758C5FBB252DA57EBA9358F36F2FC536E5 |
+| existing_smoke.py | 3BD360C4991DCA52F2C97CEF034A833223311CCCE0348E8FE945E777C15441CA |
+
+只删除本轮探针，未按名称清理原 smoke。最终业务仓库无新增或修改；仅案例目录的本报告位于 workspace 外。报告第一次写入后进行了精简；一次 PowerShell 报告重写被执行器拒绝，随后用 apply_patch 成功写入最终版本，不影响审计 workspace。
+
+## 评审、治理和未验证项
+
+没有接受的功能缺陷，无需缺陷评级或代码修复。源码防护和实际反例共同排除“旧提交无条件覆盖 B”；匹配对照排除“所有恢复提交均被拒绝”。不因缺 lease 报错。
+
+校验与赋值是两条语句。若真实调用方允许期间并发改变所有权，需要原子条件写或等效串行保证；本例没有此调用方、并发模型或存储证据，不将条件风险升级为已确认可达缺陷。
+
+后续如授权永久回归，可将本轮断言纳入既有体系，保留原 smoke。真实部署验收仍需实际 generation 转移与完成原子边界、False 处理、崩溃持久恢复、接管重试收敛时间，以及适用的兼容/回滚验证；本次均未执行。无发布或服务操作，不需要本轮回滚。覆盖所给合同与保护要求后停止扩展，不声称零风险。
+
+大白话：旧 worker 拿旧号码回来会被挡住，本地已证实它改不掉新结果；真实服务如何换号、停机后如何恢复，本例没有提供。
+
+## Executive Summary
+
+【目标】审计恢复提交是否覆盖当前结果。  
+【改动文件】业务文件无改动；仅本例 report.md，临时探针已清理。  
+【风险】真实并发、持久化、RTO 未提供，未验证。  
+【必须验收】7/7 断言、已有 smoke 通过；原有脏树及两文件哈希保持。  
+【结论】所给同步模型下未发现合同违约，旧 generation 被拒绝；不延伸为生产保证。

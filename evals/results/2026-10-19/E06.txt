@@ -1,0 +1,191 @@
+# E06 读取、健康判定与修复只读审计
+
+结论：在提供的合成模型内，已确认 1 个根因问题：Reconcile 把“缓存对象存在”当成“Reader 可正常读取”，导致 checksum 错误时假绿。按所给契约，假绿同时阻断恢复任务创建。恢复执行器、任务存储和真实运行系统均未提供，修复闭环不能宣称已经成立。
+
+## 理解、计划、风险
+
+- 理解：仅审计同一对象、同一缓存的 Reader → Reconcile → Repair 正确性，交付联合验收设计。
+- 计划：读取指定技能及引用、契约、合成观测和相关模型；只读重算 checksum；定义不变量、核对反证、提出恢复与联合验收。
+- 风险：合成材料不能作为生产证据；读取与健康计算可确认，任务创建仅有契约描述，修复行为无执行代码。只读约束下不修改业务代码、不创建恢复任务、不注入故障。
+- 唯一输出变更为本 report.md，位于被审计 workspace 之外；未修改输入材料，未访问共享/生产服务。
+
+## 范围与证据性质
+
+仅使用 E06/skill/SKILL.md、其 references/audit-sop.md、request.md、artifacts/ 和 workspace/。workspace 枚举结果为空；无项目 revision、配置、数据库、服务、真实调用日志。scenarios.py 含其他模型，但本报告不审计 lease、delivery、outbox 等无关场景，不将它们并入发现。
+
+| 证据 | 内容 | 性质与限制 |
+| --- | --- | --- |
+| request.md | 所有材料合成；要求只读，联合验收设计 | 任务边界 |
+| artifacts/contract.md:1 | 同一对象/缓存；checksum 不一致 Reader 拒读；健康声称 Reader 正常可读；只有不健康才创建恢复任务；未提供恢复执行器 | 本案业务正确性契约，任务路径依据 |
+| artifacts/scenarios.py:46–51 | 构造 changed payload，保留 original checksum；Reader 实算 SHA256；health=bool(stored) | 当前合成源码，非生产实现 |
+| artifacts/observed.json:2–8 | reader_valid=false；reconcile_healthy=true；含 payload/checksum | 提供的静态合成观测，非本轮测试产物，无时间/频次信息 |
+| 本轮只读 SHA256 重算 | 实际 payload 哈希与 stored checksum 不同 | 独立确认 fixture 校验失败；未运行 Reader 服务或修复流程 |
+
+## 实际链路与核心不变量
+
+实际存在的模型链路：构造缓存 stored(payload, checksum) → Reader 对 payload UTF-8 字节计算 SHA256 与 checksum 比较；并行的 Reconcile 对同一个 stored 计算 bool(stored) → 根据契约，仅 unhealthy 分支创建恢复任务 → 恢复执行器未提供 → 修复后 Reader 结果未知。
+
+对象标识为 payload 内 obj-1；未提供缓存 key、权威数据源、版本、generation、任务唯一键、持久化事务或调度器。不能凭空补出这些机制。恢复任务和执行器不是 scenarios.py 中已实现的路径。
+
+1. I1（契约直接定义）：同一对象、同一份缓存，health=true 必须意味着该 Reader 正常可读；等价地 Reader invalid ⇒ health 不得为 healthy。
+2. I2（契约的恢复前提）：Reader 不可读的可修复对象必须能进入不健康/恢复分支；否则“只有不健康才建任务”不能覆盖该故障。
+3. I3（闭环验收要求）：修复成功必须以目标对象经过实际 Reader 验证为准，不能以任务创建、执行方法返回或 checksum 字段更新作为成功。
+4. I4（拟议的恢复安全要求，现有实现未提供）：修复应使用已确认的正确来源；不得只为损坏 payload 重算 checksum 就宣称业务恢复。存在并发写时须避免以旧数据覆盖已更新内容，具体保护机制由实际系统决定。
+
+本案没有任务状态机实现，不能给不存在的状态/租约判“非法”。可用的逻辑结果是 reader-valid/invalid 与 healthy/unhealthy 两轴：valid+healthy 正常；invalid+unhealthy 可进入恢复；invalid+healthy 明确违约；valid+unhealthy 可能是扫描竞态、保守结果或误报，需结合是否同一快照判断。
+
+## 已确认问题与二次评审
+
+### F1：存在性检查替代读取校验，造成假绿并阻断恢复入口
+
+- 状态：合成模型内已确认；真实生产是否存在同样实现未知。
+- 根因：scenarios.py:50 使用 bool(stored)，它只证明容器非空，未验证 Reader 在 :49 所要求的 checksum 一致性。
+- 可达前提：stored 是包含非空 payload/checksum 的字典，payload 被修改但 checksum 未同步；源码 :47–48 已直接构造该输入，不需要额外竞态假设。
+- 违反：I1；依据恢复契约进一步违反 I2 的覆盖要求。
+- 结果：Reader 仍拒读，健康报告显示可读；据 contract.md 的唯一建任务条件，此对象不会由该次 Reconcile 创建恢复任务。不是仅仅一个指标显示错误，而是自动恢复入口也被短路。
+- 本轮证据：stored checksum=a5496b389714c67cba567ed56586cd63ff957b1090d46a4119dc0206d49fdd37；payload 实算=0f84bf6435b326eb3ca8b055f9c9d2ec96e2e0a942785078a41d58d7f4b67034；比较 false，与 observed 的 false/true 一致。
+- 恢复影响：只要该坏值继续存在且健康算法不变，该扫描路径将持续假绿；是否有其他独立恢复入口未知，不断言系统永久不可恢复。
+- Impact：目标对象持续不可读且扫描不触发恢复；影响范围/租户数/业务金额未提供。
+- Likelihood：对当前 fixture 是确定可达；现实损坏发生概率、持续时间未知。
+- 建议修复优先：先修复此判断分歧并补永久联合回归。目标未给严重级别标准，不映射通用 P0/P1。
+- 处理：需要实现层修正及测试；本轮按只读要求未修代码。
+- 反证核对：若 health 的含义仅是 key 存在，bool(stored) 可以自洽，但 contract.md 明确声称“可被该 Reader 正常读取”，因此该解释不能排除本案问题。Reader 已拒绝坏校验和，能阻止坏值被当作有效读取；这不解决可用性和恢复阻断。
+
+| 项目 | 二次判定 | 处理 |
+| --- | --- | --- |
+| Reader/health 分歧 | 已确认缺陷 | F1 根因 |
+| 假绿导致不建恢复任务 | 契约可直接推导的后果；无队列执行观测 | 合入 F1，不另计一个独立根因 |
+| 恢复执行器、任务持久化/重试缺失 | 材料未提供，未验证 | 补证据和验收，不能断言真实系统无执行器 |
+| checksum 错误仍被 Reader 返回 | 不成立 | 当前 Reader 明确返回 invalid |
+| 坏数据的最初写入来源/并发 torn write | 无证据 | 不把造数语句推定为生产写入根因 |
+| malformed/legacy 数据处理缺陷 | 未执行、未提供完整 Reader | 作为验收维度，不作为已确认问题 |
+
+## 治理包、最小修复顺序
+
+G1「读取契约、健康判定与恢复结果一致」，覆盖 F1 及恢复闭环证据缺口，不拆分重复治理包。
+
+1. 先明确 Reader 的校验契约和失败分类，以同一对象、同一内容快照为比较前提。健康判断须覆盖 Reader 的必要校验；可复用校验逻辑或通过契约一致性测试保证一致，不强制新增框架/公共接口。
+2. checksum mismatch 必须得到明确 invalid reason；Reconcile 不得 healthy，并走现有恢复入口。依赖不可用应表达 unknown/degraded/error 或等效结果，不能用存在性兜底判 healthy。具体状态名由实际系统契约决定。
+3. 核实恢复任务持久化、去重粒度、调度者、重试和人工恢复责任人；任务创建失败不可伪装为已恢复，须能被重新检测/告警。不假定当前已有这些设施。
+4. 在有权威正确来源的前提下重建缓存，验证 payload 身份与内容后发布，并以实际 Reader 成功确认修复完成。缺失正确来源则保留失败和人工入口；不要把 checksum 改成适配坏内容。
+5. 若实际系统存在并发写，修复必须重读/条件写/使用已有版本机制，避免旧快照覆盖更新；不得仅因本案未展示版本就认定实现有竞态漏洞。
+
+代码、DTO、数据库结构和配置本轮均未改动。未来具体修改文件需要拿到实际工程后确定，不虚构文件名。
+
+## 联合验收设计（全部为待执行设计）
+
+每个 case 使用同一 object identity 与相同 snapshot 同时调用实际 Reader、health checker、repair decision；记录输入字节/哈希、校验原因、三方结果、恢复任务标识与持久化证据、修复前后实际 Reader 结果。测试使用隔离环境；不得将该表当作已运行的测试。
+
+| Case / 交叉维度 | 初始输入与时序 | 联合断言与恢复要求 |
+| --- | --- | --- |
+| J1 正常基线 | 原始 payload 与正确 SHA256 | Reader valid；health healthy；不因该对象创建修复任务；重复扫描仍稳定 |
+| J2 校验错误 × 恢复入口（必测） | 精确复用 observed.json 中 obj-1 的 changed payload+旧 checksum | Reader invalid/checksum_mismatch；health 非 healthy 且原因一致；Repair decision 必须选择恢复；创建后有可查询持久化意图，不能只看返回值 |
+| J3 J2 × 重复扫描/重复投递 | 同一坏快照多次扫描并重复执行同一恢复意图 | 始终不假绿；可去重或允许幂等重复，但不丢恢复意图、不产生冲突覆盖；修复成功由 Reader 证明 |
+| J4 J2 × crash/任务写失败 | 检测坏值后、持久化任务前失败；任务落库后执行前 crash；修复发布后确认前 crash | 未持久化时后续扫描仍能恢复；已持久化时有 owner 接手/重试或人工入口；重放安全；任务未完成不能导致健康伪绿；各断点保存证据 |
+| J5 修复成功/无正确来源/修复失败 | 具备正确来源则重建；缺来源或依赖失败则尝试失败 | 成功后实际 Reader valid 且 health healthy；失败时 Reader 仍 invalid，任务保留可追踪失败/重试，不标成功；不只重算坏 payload checksum |
+| J6 并发 × 时序（如实际支持写并发） | 检测快照 A 后，业务写入正确新版本 B，再执行 A 的修复 | A 不覆盖 B；在同一快照上比较三方结果；最终 Reader 读到最新合法版本；若读到不同快照，不能直接把三方差异判为 validator 分歧 |
+| J7 异常数据 × 批扫描 | missing/null/empty、缺 checksum、非法 JSON、错类型、unsupported legacy format；夹入正常邻对象 | 根据真实 Reader 契约分别定义 reject/fallback/error；Reader 不能读的对象 health 不得 healthy；错误原因明确，正常对象不被整批拖死。除本案 checksum mismatch 外，格式兼容策略须先确认 |
+| J8 缓存/扫描依赖失败 | 读缓存超时、部分对象读取失败、扫描中断 | 不将未知/未扫描判成 healthy 或已完成；区分业务坏数据与设施失败；重试、扫描覆盖和告警有可检索证据 |
+| J9 发布/回滚（如实际滚动部署） | 新旧 Reader/checker/repair 受支持组合；部署与回滚中断 | 所有受支持组合满足 I1/I3；若旧 checker 假绿，回滚不能恢复自动修复的虚假成功判定，需受控降级/人工恢复方案；未支持组合应有明确可验证发布前置条件 |
+
+J2 是关闭 F1 的最小永久回归；J1/J3/J5 是基础恢复验收；J4、J6、J7、J8、J9 按真实运行机制补齐，但不能以“健康测试通过”替代修复执行器证据。权威来源、版本机制、支持格式及部署组合未给定，相关测试参数需要实现方确认。
+
+## 恢复闭环、上线 Gate 与回滚
+
+| 要素 | 当前证据/缺口 | 验收要求 |
+| --- | --- | --- |
+| Failure | payload 与 checksum 不一致，Reader 拒读 | 固定本案输入建立永久 regression |
+| Detection | Reconcile 假绿，无法覆盖该故障 | 同快照得到 checksum_mismatch；错误、未知与健康区分 |
+| Durable intent | contract 仅规定 unhealthy 才建任务，代码/存储未提供；本案 healthy 阻断入口 | 提供实际持久化记录、任务身份、创建失败后的再检测证据 |
+| Repair owner | 执行器、调度与人工负责人未提供 | 明确自动 owner、失败转交和可操作人工入口 |
+| Retry/convergence | 重试策略、退避、上限、幂等、失败残留清理未知 | 提供重复/中断/失败恢复结果和最终 Reader 读成功证据 |
+| RTO | 未提供；目前不能证明有限恢复时间 | 业务确定检测周期+排队/执行/重试上限及超时告警；按目标实测，不能自定数值冒充 SLA |
+| Completion | 没有修复后 Reader 证据 | 实际 Reader 可读且内容正确，health 收敛；不能只看队列完成 |
+
+上线 Gate：F1 的同快照联合 regression、恢复意图与执行证据、失败重试/人工入口、适用并发与兼容回归全部提交后才允许关闭；未实现/未执行项逐项列为未通过，不以此次静态审计代替上线验收。
+
+回滚验收：在隔离环境确认版本回退不会恢复 bool(stored) 假绿或覆盖新正确数据；保留可重放恢复意图与失败记录，必要时采用已有运维/人工流程保持坏对象可见。回滚不能删除未完成任务或把损坏缓存重新宣布健康。未提供工程/部署环境，以上仅为设计。
+
+## 实际执行命令与结果
+
+环境：Windows PowerShell；输入根目录 <evaluation-root>\E06。以下 4 次审计 shell 调用均 exit_code=0；只有只读文件读取、枚举、哈希计算。没有运行 scenarios.py 的 observe()（它还包含无关的 SQLite 写与故障模型），没有运行服务或注入故障。
+
+### C1：先加载技能
+```powershell
+Get-Content -Raw '<evaluation-root>\E06\skill\SKILL.md'
+```
+结果：成功读取 distributed-system-audit，确认只读边界、证据标准、恢复闭环及最终 Executive Summary 要求。
+
+### C2：读取请求、SOP 并枚举输入
+```powershell
+Get-Content -Raw '<evaluation-root>\E06\request.md'
+Get-Content -Raw '<evaluation-root>\E06\skill\references\audit-sop.md'
+Get-ChildItem -Recurse -File '<evaluation-root>\E06\artifacts','<evaluation-root>\E06\workspace' | Select-Object FullName
+```
+结果：artifacts 仅列出 contract.md、observed.json、scenarios.py；workspace 没有文件输出。已使用 SOP 的快照、Reader/Reconcile、恢复、二次评审和验收章节。
+
+### C3：读取所有合成输入并检查 workspace
+```powershell
+Get-Content -Raw '<evaluation-root>\E06\artifacts\contract.md'
+Get-Content -Raw '<evaluation-root>\E06\artifacts\observed.json'
+Get-Content -Raw '<evaluation-root>\E06\artifacts\scenarios.py'
+Get-ChildItem -Force '<evaluation-root>\E06\workspace'
+```
+结果：成功读取上文证据；workspace 为空。未导入 Python 模块或执行模型函数。
+
+### C4：带行号源码、独立 checksum 验证和输入指纹
+```powershell
+$caseRoot = '<evaluation-root>\E06'
+$n = 0; Get-Content -LiteralPath "$caseRoot\artifacts\scenarios.py" | ForEach-Object { $n++; '{0,4}: {1}' -f $n, $_ }
+$observed = Get-Content -Raw -LiteralPath "$caseRoot\artifacts\observed.json" | ConvertFrom-Json
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($observed.stored.payload)
+$actual = ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+$sha.Dispose()
+[pscustomobject]@{StoredChecksum=$observed.stored.checksum; ActualPayloadChecksum=$actual; Match=($actual -ceq $observed.stored.checksum); RecordedReaderValid=$observed.reader_valid; RecordedReconcileHealthy=$observed.reconcile_healthy} | ConvertTo-Json
+Get-FileHash -Algorithm SHA256 -LiteralPath "$caseRoot\request.md","$caseRoot\artifacts\contract.md","$caseRoot\artifacts\observed.json","$caseRoot\artifacts\scenarios.py","$caseRoot\skill\SKILL.md","$caseRoot\skill\references\audit-sop.md" | Format-List Path,Hash
+```
+结果：exit_code=0；源码 read_health 位于 46–51 行。计算输出：
+```json
+{
+  "StoredChecksum": "a5496b389714c67cba567ed56586cd63ff957b1090d46a4119dc0206d49fdd37",
+  "ActualPayloadChecksum": "0f84bf6435b326eb3ca8b055f9c9d2ec96e2e0a942785078a41d58d7f4b67034",
+  "Match": false,
+  "RecordedReaderValid": false,
+  "RecordedReconcileHealthy": true
+}
+```
+这次计算没有变更缓存，没有执行修复，也不是故障注入。它确认静态 fixture 的 checksum 不匹配，不代表生产 Reader/Reconcile 联调通过。
+
+输入 SHA256：
+```text
+request.md                       6E3FEF4EB04E1FEDE80FA1830A8292E2D187BC98E1D0FA436D590193CEA94E8E
+artifacts/contract.md            D4F497AA0093AA48A2409A650563CB8A27C94E3678EF4E5A251FC0963697B710
+artifacts/observed.json          8293420969F6F0D2DD03BB7D610016F5D3C8889BAFFC81059E73E2DE2543AA9C
+artifacts/scenarios.py           9DD089F8B3954CAAA361FF9C468763E97EAC16CCF26CF9EC17444E2E55206EF1
+skill/SKILL.md                  842DC3D3FF9C0FD2BC08EFD0D286FD6EFBCD8469192254DB1BCCE42088C7C834
+skill/references/audit-sop.md    5D311CA922FA10C1CAC3F3B78DA1EC0153E41801DF4FCA7198A91995FB35B18D
+```
+
+报告输出操作：使用 PowerShell UTF-8 Set-Content -LiteralPath 写入唯一授权输出 E06/report.md；之后以 Get-Item/Get-Content/Get-FileHash 只读复核报告与输入。该操作不在 workspace 内。
+
+## 未验证项与收敛结论
+
+- 未运行现网、共享服务、真实 Reader/Reconcile API、队列、数据库或任务执行器。
+- 没有本轮端到端复现；只有源码/契约审计、提供的合成观测、独立 SHA256 确认。
+- 任务创建、持久化、重试、执行器、正确数据源、修复成功、告警、RTO 均缺证据；联合验收 J1–J9 未执行。
+- 无仓库 revision、测试套件、部署/回滚契约；不宣称任何实际系统已修复、健康或上线通过。
+- 已审链路收敛为一个根因组；其余条目是验收/证据缺口，不扩成无依据缺陷。
+
+## 大白话解释
+
+现在的健康检查像“柜子里有个盒子就说东西能用”，但真正取东西的人会验封条，发现封条对不上就拒收。更关键的是，只有检查说“坏了”才叫人修，所以这个错误的绿灯连维修入口也挡住了。先让检查认出同一份坏数据，再证明维修任务真的落下、有人执行、修完能读，才算闭环。
+
+## Executive Summary
+
+【目标】只读核查读取、健康与修复一致性。  
+【改动文件】仅案例 report.md；输入与 workspace 未改。  
+【风险】合成模型假绿阻断恢复入口；执行器/RTO 未提供。  
+【必须验收】同快照 checksum 联合回归、持久化恢复、失败重试与修复后 Reader 成功；均待执行。  
+【结论】确认 1 个根因；已完成静态审计与独立哈希核验，未声称生产复现或修复闭环。
+

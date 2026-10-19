@@ -1,0 +1,156 @@
+# E08 只读二次评审报告
+
+## 结论与边界
+
+notification 未发出、projection 未刷新、fulfillment 未启动，在本案例中应合并为 **一个根因治理包：fact 与 event 被拆成两次提交，提交事实后丢失持久化下游意图**。不应按三个下游各立一个独立缺陷或分别补重试。
+
+已加载案例内 `skill/SKILL.md` 与其引用 `skill/references/audit-sop.md`。仅审阅本案例的 request、artifacts 和 workspace；workspace 为空。所有材料均为合成评测材料，报告不主张生产证据。本轮只读，不执行模型、临时探针、故障注入或测试，不修改输入、代码、数据库、配置或服务。唯一新增文件是 workspace 外的本报告。
+
+理解：复核三个症状的真实性、共同根因、恢复能力，并提出永久回归要求。
+
+计划：核对契约及观测，沿共同 save 边界分析故障窗口，复核反证，形成修复和验收要求。
+
+风险：没有实际业务仓库、下游实现、生产时序和运行环境；只能确认合成模型中的缺陷，不能将模型计数当成真实通知、投影、履约的实测结果。
+
+## 证据、链路与不变量
+
+| 证据 | 当前材料支持的事实 | 限制 |
+| --- | --- | --- |
+| artifacts/contract.md:1 | 三个入口共同调用 save；fact、event 在同一支持事务的数据库；提交 fact 必须同时具备可供下游恢复的持久 event；没有扫描 fact 补发 event 的其他恢复者 | 案例契约，不是生产拓扑 |
+| artifacts/scenarios.py:54–63 | 建表后，save 插入 fact（60），立即 commit（61），在 event 插入前抛出模拟连接异常（62）；63 的注释说明正常下一步是插入 event 后再次提交 | 注入被固定为必经路径；正常 event 插入仅由注释描述，不能声称已执行正常路径 |
+| artifacts/scenarios.py:65–72 | notification、projection、fulfillment 都调用 save；调用方捕获异常并继续收集错误，没有事件补写逻辑 | 只展示合成入口；没有真实调用方重试实现 |
+| artifacts/observed.json:2–8 | 三条错误分别对应 fact 1、2、3；fact_count=3，event_count=0 | 随材料提供的观测，本轮未重新运行；无采集时间、环境或修订信息 |
+
+实际可见链路：三个 kind 的入口 → save → INSERT fact → commit → 故障窗口 → 预期 INSERT event / commit → 下游按 event 恢复处理（后两段未实现，仅由契约与注释说明）。共同入口不代表三个下游拥有相同实现；这里只能定位它们共享的上游缺口。
+
+标识为 fact.id，event.fact_id 是主键；event.kind 用于事件类别。版本、消费者 ACK、调度器、健康检查、重试负责人和告警实现未提供，不自行补设 MQ、lease 或 fence。
+
+核心不变量：每个已提交 fact 必须有对应的持久 event，供必需的下游动作恢复。此契约下的合法状态为“两者均无”或“fact 与 event 均已提交”；“fact 已提交、event 缺失”不是可由现有机制收敛的合法暂态。event 存在只表示下游意图持久化，不表示真实下游业务已经完成。
+
+## 二次评审与根因分组
+
+| 编号 / 症状 | 真实性 | 根因组 | 影响 | 发生可能性 | 建议处理 |
+| --- | --- | --- | --- | --- | --- |
+| F1 notification 未发出 | 合成上游缺陷已确认；真实通知发送未验证 | G1 | 已提交事实无事件，通知不能从事件恢复 | 注入路径必现；实际故障频率未知 | 修复共同事务边界 |
+| F2 projection 未刷新 | 同上；真实读端状态未验证 | G1 | 投影失去触发来源，可能持续陈旧 | 同上 | 合并 G1 |
+| F3 fulfillment 未启动 | 同上；真实履约系统未验证 | G1 | 已提交业务事实缺少启动意图 | 同上 | 合并 G1 |
+
+G1 可达前提：fact 的第一次提交成功，在第二次提交前发生进程或连接故障。源码明确建模此窗口，观测与之吻合。异常回到调用方时，先前提交不会因捕获异常自动回滚；只重试事件消费者也找不到缺失的 event。契约排除了 fact 扫描补发者，因而没有已知自动恢复路径。
+
+影响与可能性分别评价：影响是必需下游动作永久遗漏的高影响正确性缺陷；实际窗口触发率无数据，不能量化或断言经常发生。未提供项目严重级别表，因此仅建议将 G1 列为高优先修复，不强行映射为通用 P0/P1。
+
+反证复核：数据库支持事务是可用修复能力，但当前代码提前 commit，不能充当现有原子性保障；event.fact_id 主键只约束已插入事件的唯一性，不能确保事件存在；记录错误提供可见性，但不是持久恢复意图。`scenarios.py` 中 lease、delivery、read_health、lease_free 是独立函数，未被 outbox 调用，不能借它们解释这三个症状或扩成其他治理包。材料不足以证明三个下游没有独立缺陷，也不足以提出新的独立缺陷。
+
+第二遍按契约→共享调用→提交点→异常捕获→恢复者→反证复核，根因仍稳定为 G1。此收敛仅限所给材料，不是全系统零风险声明。
+
+## 修复目标与恢复闭环（建议，未实施）
+
+G1 的最小修复目标：利用现有数据库事务，把 fact 和对应 event 的插入放在同一事务内提交；任一插入失败，两者一起回滚。不要以修改三个下游、吞掉异常、仅增加消费者重试或在提交后同步调用外部服务代替原子持久化。无需因此引入新框架或迁移数据库结构。
+
+| 恢复环节 | 当前证据 | 必须补齐的验收 |
+| --- | --- | --- |
+| 检测 | errors 暴露模拟异常；材料中的计数可显示缺口，无健康检查实现 | 检测已提交 fact 缺 event；不能因循环返回或无待处理事件判健康 |
+| 持久恢复意图 | 故障窗口内缺失 | 新写入原子提交；事件提交后即使进程退出仍可找到并继续处理 |
+| 修复负责人 | 模型无恢复者；真实团队负责人未知 | 指定共享 save 维护方处理边界，指定运营/数据恢复负责人处理存量；实际认领未确认 |
+| 存量修复 | 没有入口 | 先只读识别 fact/event 缺口；经具体授权后按业务键幂等补事件，避免重复外部效果；修好代码不会自动补已有缺口 |
+| 收敛 | 无自动重试证据 | 真实下游消费、失败重试和业务结果可验证；event 存在不能代替消费成功 |
+| RTO / 告警 | 未提供 | 明确缺口检测时限、责任人、重试/人工介入时限与业务完成目标；本轮不编造数值 |
+
+调用方重试可能带来的重复业务事实尚不能单独定性：材料未给业务幂等契约或请求标识。永久回归需补该契约，不能仅凭 fact 自增主键宣称重试安全。
+
+## 永久回归要求与验收
+
+以下均为待执行要求，**本轮没有运行**。应进入共同 save 的永久回归，并通过三个真实入口参数化覆盖，不能只测试一个模型函数。
+
+| 场景（状态 × 故障 × 时序） | 正确断言 |
+| --- | --- |
+| 三个入口各正常提交 | 对应 fact/event 同时持久化，关联 ID/kind 正确；分别验证各下游契约结果 |
+| fact 插入后、event 插入前异常 | 整体事务回滚，无已提交孤立 fact；用独立连接验证持久结果 |
+| event 插入失败或约束异常 | fact 也回滚，错误传播，不报告成功 |
+| 两者写入后、commit 前进程退出 | 重启后两者都未提交；不能只用同连接读取作为证明 |
+| commit 成功后、触发下游前进程退出 | 两者均持久；恢复处理可达，最终真实下游结果满足契约 |
+| 提交结果不明、调用方重复或并发请求 | 按实际业务幂等契约验证事实、事件与下游效果的数量；不能把“一个 fact 至多一个 event”当作请求幂等 |
+| 下游暂时不可用、部分处理后重试 | 意图保留且重试有负责人；收敛后通知、投影、履约分别正确；重放不会产生业务禁止的重复效果 |
+| 存量孤立 fact 与已有 event 混合恢复 | 只补缺口，保留已有事件；重复执行恢复安全，真实读端/业务端收敛 |
+| 新旧 writer 共存及回滚 | 若支持滚动部署，证明旧路径不能继续制造缺口；回滚不得重新启用已知破坏不变量的 save；部署模型未提供，须按实际支持组合验收 |
+
+修复顺序：先确认共享事务边界及业务重试契约 → 修复 G1 并落永久回归 → 验证全部真实入口和下游恢复 → 处理存量缺口 → 按实际部署模式验收上线/回滚。存量修复与故障注入均需具体环境和授权，当前未执行。
+
+上线关闭条件：相关永久回归通过；关键调用方异常语义核对完成；事务故障和重启证据齐全；存量缺口有统计和处置结果；下游业务结果、检测、恢复责任/RTO 有证据；适用的新旧版本共存与回滚验收完成。仅修改代码或原测试全绿不能关闭 G1。
+
+## 实际命令及结果
+
+以下命令均通过 PowerShell 只读执行，均 exit_code=0。没有运行 `python scenarios.py`；查询 Python 路径只是确认本机可用命令，不是复现证据。时间基准为本次案例执行，未取得生产或源码 Git revision。
+
+1. 加载技能：
+   ```powershell
+   Get-Content -LiteralPath '<evaluation-root>\E08\skill\SKILL.md' -Raw
+   ```
+   结果：完整读到 distributed-system-audit 技能；明确只读不得修改文件/数据/配置、重启或注入，应给探针设计并标记未验证。
+
+2. 读取请求、引用与输入清单：
+   ```powershell
+   Get-Content -LiteralPath '<evaluation-root>\E08\request.md' -Raw
+   Get-Content -LiteralPath '<evaluation-root>\E08\skill\references\audit-sop.md' -Raw
+   Get-ChildItem -LiteralPath '<evaluation-root>\E08\artifacts','<evaluation-root>\E08\workspace' -Recurse -File | Select-Object FullName,Length
+   ```
+   结果：请求要求三个症状二次评审、根因分组、永久回归，本轮只读不补丁；完整读取 SOP。文件清单仅 contract.md（315 bytes）、observed.json（220 bytes）、scenarios.py（4450 bytes）。
+
+3. 并行只读三个文件（实际各执行一次，`<文件名>` 依次为 contract.md、observed.json、scenarios.py）：
+   ```powershell
+   $lineNumber = 0; Get-Content -LiteralPath '<evaluation-root>\E08\artifacts\<文件名>' | ForEach-Object { $lineNumber++; '{0,4}: {1}' -f $lineNumber, $_ }
+   ```
+   结果：分别返回 1、9、102 行的带行号内容。关键原文为 `db.commit()`（61）、紧接着 `raise ConnectionError(...)`（62），入口 kind 为 notification/projection/fulfillment（66）。观测原文：
+   ```json
+   {
+     "errors": [
+       "synthetic failure before event insert for 1",
+       "synthetic failure before event insert for 2",
+       "synthetic failure before event insert for 3"
+     ],
+     "event_count": 0,
+     "fact_count": 3
+   }
+   ```
+
+4. 查看空 workspace 和 Python 命令：
+   ```powershell
+   Get-ChildItem -LiteralPath '<evaluation-root>\E08\workspace' -Force | Select-Object Mode,Name,Length
+   Get-Command python -ErrorAction SilentlyContinue | Select-Object Source
+   ```
+   结果：workspace 无条目；Python 路径为 `%USERPROFILE%\AppData\Local\Programs\Python\Python312\python.exe`。
+
+5. 输入指纹与递归空目录确认：
+   ```powershell
+   Get-FileHash -Algorithm SHA256 -LiteralPath '<evaluation-root>\E08\artifacts\contract.md','<evaluation-root>\E08\artifacts\observed.json','<evaluation-root>\E08\artifacts\scenarios.py'
+   Get-ChildItem -LiteralPath '<evaluation-root>\E08\workspace' -Force -Recurse | Measure-Object
+   ```
+   结果：递归 Count=0。SHA256（按上述输入顺序）：
+   - contract.md: `B9D7F33F4DFA9563A17E27D554100CC0FAF01AA4854DBFC55CA45D9303B120AD`
+   - observed.json: `8407A2A8E0AEE80482BDA416933F342238A45D14179D938FC9A4F2FAF5855D50`
+   - scenarios.py: `9DD089F8B3954CAAA361FF9C468763E97EAC16CCF26CF9EC17444E2E55206EF1`
+
+6. 报告落盘检查：
+   ```powershell
+   Get-Item -LiteralPath '<evaluation-root>\E08\report.md' | Select-Object FullName,Length
+   Select-String -LiteralPath '<evaluation-root>\E08\report.md' -Pattern '^## Executive Summary','^【结论】'
+   ```
+   结果：exit_code=0，文件存在；补记该检查前长度为 14055 bytes，摘要标题与结论均有匹配。
+
+报告使用 apply_patch 新增并补记检查至本案例 report.md，未写入被审计 workspace。输入指纹仅用于标识本次审阅材料，不是生产版本证明。
+
+## 未验证项、改动与大白话解释
+
+修改文件：仅本报告。核心改动：无业务实现改动。自测结果：无测试执行；完成了源路径、契约、观测与反证的静态交叉核对。
+
+未验证：提供观测的采集过程、真实事务环境、实际正常 event 写入、真实三个下游、真实重试与幂等、告警、存量恢复、故障/重启测试、版本兼容与回滚、RTO。不存在把未执行的回归或探针标成通过的情况。
+
+大白话：三个部门都等同一张派工单。现在先把业务记录落账，再另写派工单，中途故障就会“账已落、单没派”。要先把记录和派工单一并保存；旧的漏单还要另行查清补齐。派工单保存成功，也仍要验收各部门实际把事办完。
+
+## Executive Summary
+
+【目标】只读二评通知、投影、履约三个症状。
+【改动文件】仅案例 report.md，未改代码或输入。
+【风险】合成模型，观测未重跑，真实下游未验证。
+【必须验收】共同事务原子性、三入口永久回归、重启恢复、存量补齐及适用回滚。
+【结论】三个症状合并 G1：fact 提交后缺持久 event，现有契约下无恢复者；静态证据成立，未执行补丁或探针。
