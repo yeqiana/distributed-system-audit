@@ -122,6 +122,7 @@ python scripts/prepare_behavior_eval.py
 | [evals](evals/manual-evaluation.md) | 行为验收标准与结果记录 |
 | [docs/release-checklist.md](docs/release-checklist.md) | 发布检查 |
 | [docs/promotion-copy.md](docs/promotion-copy.md) | 介绍文案 |
+| [docs/skillpay-one-time-purchase.md](docs/skillpay-one-time-purchase.md) | Skill Pay 一次性商品上架准备与交付边界 |
 
 ## 许可证
 

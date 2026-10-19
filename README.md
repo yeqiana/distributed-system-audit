@@ -124,6 +124,7 @@ The [recorded local evaluation](evals/results/2026-10-19/README.md) passed 11/11
 | [evals](evals/manual-evaluation.md) | Behavioral acceptance criteria and result recording |
 | [docs/release-checklist.md](docs/release-checklist.md) | Publication checks |
 | [docs/promotion-copy.md](docs/promotion-copy.md) | Introduction copy |
+| [docs/skillpay-one-time-purchase.md](docs/skillpay-one-time-purchase.md) | Skill Pay one-time listing preparation and delivery constraints |
 
 ## License
 
