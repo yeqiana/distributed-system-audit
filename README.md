@@ -1,6 +1,6 @@
 # Distributed Systems Audit
 
-[简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md) | [English](README.md)
 
 An agent skill for auditing **correctness across component boundaries and recovery after failure**. Trace the real execution path, define invariants, verify reachable failure cases, and turn evidence-backed findings into repair and acceptance plans.
 

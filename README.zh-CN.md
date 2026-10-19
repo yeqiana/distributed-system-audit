@@ -1,6 +1,6 @@
 # 分布式系统审计
 
-[English](README.md)
+[简体中文](README.zh-CN.md) | [English](README.md)
 
 一个用于审计**跨组件正确性与故障恢复**的 Agent Skill：沿真实调用链检查不变量，用证据验证可达问题，再形成修复、回归与验收方案。
 
